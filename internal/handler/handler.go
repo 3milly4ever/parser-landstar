@@ -36,13 +36,19 @@ func MailgunHandler(c *fiber.Ctx) error {
 	decodedBodyHTML, err := decodeQuotedPrintable(bodyHTML)
 	if err != nil {
 		logrus.Error("Error decoding quoted-printable body-html: ", err)
+		// Attempt to use the raw HTML body if decoding fails
+		decodedBodyHTML = bodyHTML
 	}
 
 	// Convert the HTML body to plain text
 	plainTextFromHTML := stripHTML(decodedBodyHTML)
 
-	// Replace \n with actual newlines in the plain text body
-	formattedBodyPlain := strings.ReplaceAll(bodyPlain, "\\n", "\n")
+	// Replace escaped newline characters with spaces in the plain text body
+	formattedBodyPlain := strings.ReplaceAll(bodyPlain, "\\n", " ")
+	formattedBodyPlain = strings.ReplaceAll(formattedBodyPlain, "\\r", " ")
+
+	// Remove multiple consecutive spaces
+	formattedBodyPlain = regexp.MustCompile(`\s+`).ReplaceAllString(formattedBodyPlain, " ")
 
 	// Extract the order number from the plain text body
 	orderNumber := parser.ExtractOrderNumber(formattedBodyPlain)
@@ -85,7 +91,6 @@ func decodeQuotedPrintable(input string) (string, error) {
 	return buf.String(), nil
 }
 
-// Helper function to strip HTML tags from a string and handle newlines
 func stripHTML(input string) string {
 	// Decode HTML entities
 	decoded := html.UnescapeString(input)
@@ -94,11 +99,17 @@ func stripHTML(input string) string {
 	re := regexp.MustCompile(`<.*?>`)
 	cleaned := re.ReplaceAllString(decoded, "")
 
-	// Replace multiple newlines with a single newline for readability
-	cleaned = regexp.MustCompile(`\n+`).ReplaceAllString(cleaned, "\n")
+	// Remove excessive whitespace and replace with a single space
+	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
+
+	// Replace escaped newlines with actual newlines
+	cleaned = strings.ReplaceAll(cleaned, "\\n", "\n")
+	cleaned = strings.ReplaceAll(cleaned, "\\r", "\r")
 
 	// Trim leading and trailing whitespace
-	return strings.TrimSpace(cleaned)
+	cleaned = strings.TrimSpace(cleaned)
+
+	return cleaned
 }
 
 func saveToJSONFile(data map[string]string) error {
