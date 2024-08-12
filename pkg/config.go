@@ -1,10 +1,10 @@
 package config
 
 import (
-	"log"
 	"os"
 
 	"github.com/joho/godotenv"
+	"github.com/sirupsen/logrus"
 )
 
 type Config struct {
@@ -17,9 +17,11 @@ var AppConfig Config
 
 func LoadConfig() {
 	// Load .env file if present
-	err := godotenv.Load()
+	err := godotenv.Load("/home/emil/parser-landstar/.env")
 	if err != nil {
-		log.Println("No .env file found")
+		logrus.Warn("No .env file found")
+	} else {
+		logrus.Info(".env file loaded successfully")
 	}
 
 	AppConfig = Config{

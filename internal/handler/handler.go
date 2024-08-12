@@ -1,17 +1,23 @@
 package handler
 
 import (
-	"github.com/3milly4ever/parser-landstar/internal/log"
+	"net/url"
+
 	"github.com/gofiber/fiber/v2"
+	"github.com/sirupsen/logrus"
 )
 
 func MailgunHandler(c *fiber.Ctx) error {
-	log.Logger.Info("Mailgun route accessed")
+	logrus.Info("Mailgun route accessed")
 
-	// Here you can add the logic to handle incoming emails from Mailgun
-	// For now, let's just log the request body and respond with an acknowledgment.
+	// Decode URL-encoded body
+	decodedBody, err := url.QueryUnescape(string(c.Body()))
+	if err != nil {
+		logrus.Error("Error decoding request body: ", err)
+		return c.Status(fiber.StatusBadRequest).SendString("Invalid request body")
+	}
 
-	log.Logger.Info("Request Body: ", c.Body())
+	logrus.Info("Decoded Request Body: ", decodedBody)
 
 	return c.SendString("Email received")
 }
