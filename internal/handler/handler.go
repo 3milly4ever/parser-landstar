@@ -1,8 +1,8 @@
 package handler
 
 import (
-	"github.com/3milly4ever/lambda-parser-landstar/internal/log"
-	"github.com/gofiber/fiber"
+	"github.com/3milly4ever/parser-landstar/internal/log"
+	"github.com/gofiber/fiber/v2"
 )
 
 func MailgunHandler(c *fiber.Ctx) error {

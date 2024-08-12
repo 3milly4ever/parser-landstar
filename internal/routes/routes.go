@@ -1,6 +1,7 @@
 package routes
 
 import (
+	"github.com/3milly4ever/parser-landstar/internal/handler"
 	"github.com/3milly4ever/parser-landstar/internal/log"
 	"github.com/gofiber/fiber/v2"
 )
