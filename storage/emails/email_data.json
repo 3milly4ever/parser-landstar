@@ -1,6 +1,210 @@
-{
-  "cleanedBody": "LARGE STRAIGHT from KINGS MOUNTAIN, NC to DYERSBURG, TN - 'Expedited Load' : 549 miles, 1599 lbs. - Posted by LOOP XPRESS (anthony@shipwithloop.com) - Alliance Posted Load.box { display: flex; align-items: center; justify-content: center; background-color: #f6f6f6; margin-top: 30px; padding-bottom: 30px; }.wrapper { margin: 0px; font-family: 'Roboto', sans-serif; font-size: 12px; line-height: 16px; background-color: #FAFAFA !important; padding: 2em; }.row { display: table; align-items: flex-start; width: 100%; } .columnOne { display: table-cell; vertical-align: middle; float: left; width: 70%; } .columnTwo { display: table-cell; vertical-align: middle; float: right; width: 30%; text-align: right; } .internal { columns: 1 auto; align-items: start; margin: 1.5rem 2rem 0rem; width: auto; } .internal1 { margin-top: 1.5rem; }.content { padding: 0 25px; font-family: 'Roboto', sans-serif; margin: 0px; background-color: white; } body { width: 100%; background-color: #ededed; margin: 0; padding: 0; font-family:'Roboto', sans-serif} html { width: 100%; } table { border-collapse: collapse; mso-table-lspace: 0pt; mso-table-rspace: 0pt; } a { /* color: #4d4d4d; */ text-decoration: underline; } a.nav { color: #CC0000; text-decoration: underline; }.dataSection { display: flex; } .line { width: 100%; height: 10px; border-bottom: 1px solid #CCCECE; text-align: center; margin-top: 20px; margin-bottom: 45px; } .line2 { width: 100%; height: 10px; border-bottom: 1px solid #CCCECE; text-align: center; margin-top: 0px; margin-bottom: 1rem; } .column {box-sizing: border-box; padding: 10px; } .map-pin-delivery { background-image: url('https://www13.sylectus.com/images/circle-green.png'); left: -5px; }.map-pin-pick-up {background-image: url('https://www13.sylectus.com/images/circle-blue.png'); left: -5px; }.rightArrow{ background-repeat: no-repeat; height: 40px; width: 40px; position: relative; background-image: url('https://www13.sylectus.com/images/arrow-right.png'); }.map-pin-delivery{ background-repeat: no-repeat; top: 1px; display: inline-flex; height: 12px; width: 13px; flex-direction: row; margin-right: 5px; }.map-pin-pick-up { background-repeat: no-repeat; top: 1px; display: inline-flex; height: 12px; width: 13px; flex-direction: row; margin-right: 3px; }.column1 { width: 40%; background-color: #ffffff;line-height: 1.5; } .column2 { width: 20%; background-color: #ffffff; display: flex; justify-content: center; align-items: center; } .column3 { width: 40%; background-color: #ffffff;line-height: 1.5; } .column4 { width: 50%; background-color: #ffffff; } .column5 { width: 50%; background-color: #ffffff; } .nextStopArrow { display: flex; justify-content: center; align-items: center; } .numberStopsIcon { font-weight: 700; font-size: 14px; letter-spacing: 1.5px; Line-height: 16px; line-height: 114%; background-color: #FFFFFF; padding: 5px 10px; border: solid #194FA1 2px; border-radius: 8px; color: #194FA1; }.container {columns: 1 auto; color: #444854;} .dataColumn { font-size: 14px; } .divBidLoad { display: flex; justify-content: center; align-items: center; padding: 2.5rem 0 2rem 0; color: #1B1E24;} .viaEmail { display: flex; justify-content: center; align-items: center; font-size: 16px; height: 6vh; padding: 1rem 0; } .titleBidLoad { font-size: 25px; display: flex; justify-content: center; align-items: center; } .bidOnLoadButtom { background-color: #215BA6; color: white; width: 100%; height: 50px; border: 0px; border-radius: 4px; font-weight: 700; font-size: 16px; letter-spacing: 2px; } .legalText { font-size: 14px; line-height: 24px; line-height: 146%; vertical-align: Center; text-align: justify; }a.nav { color: #CC0000; text-decoration: underline; } .postinfo-section{ width: 100%; font-style: normal; font-weight: 500; font-size: 15px; line-height: 20px; columns: 2 auto; margin-bottom: 30px; text-align: left; column-gap:4%; } .postinfo-section \u003e p { flex-basis: 48%; margin: 0 0 5px 0; font-weight: 400;} .legsinfo { text-align: center; font-style: normal; font-weight: 500; font-size: 15px; line-height: 20px; display: flex; padding: 30px 0; } .pickup-box { width: 45%; float: left; text-align: left; } .arrow-icon { width: 10%; margin: auto; display: inline-block;background-repeat: no-repeat; height: 40px; width: 40px; position: relative; background-image: url('https://www13.sylectus.com/images/arrow-right.png');} .delivery-box { width: 45%; float: right; text-align: left; } .pickup-box \u003e p, .delivery-box \u003e p { font-size:19px; font-weight:bold; margin:0 0 2px 0; max-height:20px;} .mobile-banner{ display: none; } .desktop-banner{ display: block; } @media screen and (max-width: 720px) { .mobile-banner{ display: block; object-fit: cover; max-height: 100px; height: auto;} .desktop-banner{ display: none; } .titleBidLoad{ font-size: 26px; } .postinfo-section \u003e p {flex-basis: 100%; margin: 0 0 5px 0;} .arrow-icon{display: none;} .legsinfo{flex-direction: column; padding: 10px 0;} .pickup-box, .delivery-box{width: 100%; columns:1 auto; padding: 10px 0;} .pickup-box \u003e *, .delivery-box \u003e *{flex-basis: 53%; margin: 0 2% 0 0;} .pickup-box \u003e p, .delivery-box \u003e p{flex-basis: 43%; margin: 0 0 0 2%; font-size:21px; max-height:22px;} .leginfo *{width: 100%;} .line-top { display: none} .divBidLoad { order: -2; justify-content: start;} .img-map{ order: -1} .bidOnLoadButtom { border-radius: 25px;} .reply-info{ text-align: center;} .dataColumn1 { order:1; } .dataColumn2 { order:2; } .dataColumn3 { order:3; } .dataColumn4 { order:4; } .dataColumn5 { order:5; } .dataColumn6 { order:6; } .dataColumn7 { order:7; } .dataColumn8 { order:8; } .dataColumn10 { order:10; } .dataColumn11 { order:11; } .dataColumn12 { order:12; } .dataColumn13 { order:13; } .dataColumn14 { order:14; } .dataColumn15 { order:15; } .dataColumn16 { order:16; } .item-notes { order: 17; } }.info-container {max-width: 65%;}@media screen and (max-width: 900px) {.info-container{max-width: 100%; width: 100%;}} This email is for licensed users of Sylectus and is subject to the Terms and Conditions of the Sylectus Service Agreement. Any attempt to forward or otherwise access the contents of this email (via scrapping, bots or other electronic means) by unlicensed users is a violation of the Service Agreement, intellectual property infringement and may result in termination of access to Sylectus and/or subject to additional licensing fees due upon notice. Bid on Order #19804 Pick-UpKings Mountain, NC 2808608/12/2024 13:00 EST DeliveryDyersburg, TN 3802408/13/2024 09:00 EST 2 STOPS, 549 MILES Broker: LOOP XPRESS LOGISTICS LLCPosted Amount: $0.00 USDBroker Phone: (877) 210-5777Load Type: Expedited LoadEmail: anthony@shipwithloop.comVehicle required: LARGE STRAIGHTPosted: 08/12/2024 07:26 ESTPieces: 2Expires: 08/12/2024 07:41 ESTWeight: 1,599 lbs.Dock Level: NoDimensions: 72L x 32W x 48HHazmat: NoStackable: NoCSA/Fast Load: NoNotes: 2 skids 72x32x48 1599lbs. PU 8/12 1300EST..DELIVER 8/13 0800CST..** MUST BE TRUE DOCK HIGH AND HANDLE FORKLIFT** BID ON LOAD If you would like to reply to the poster, simply reply to this email. © 2023 Solera, Inc.All Rights Reserved || www.solera.com Privacy Policy",
-  "extractedOrder": "19804",
-  "formattedBody": "LARGE STRAIGHT from KINGS MOUNTAIN, NC to DYERSBURG, TN - 'Expedited Load' : 549 miles, 1599 lbs. - Posted by LOOP XPRESS (anthony@shipwithloop.com) - Alliance Posted Load This email is for licensed users of Sylectus and is subject to the Terms and Conditions of the Sylectus Service Agreement. Any attempt to forward or otherwise access the contents of this email (via scrapping, bots or other electronic means) by unlicensed users is a violation of the Service Agreement, intellectual property infringement and may result in termination of access to Sylectus and/or subject to additional licensing fees due upon notice. Bid on Order #19804 Pick-Up Kings Mountain, NC 28086 08/12/2024 13:00 EST Delivery Dyersburg, TN 38024 08/13/2024 09:00 EST 2 STOPS, 549 MILES Broker: LOOP XPRESS LOGISTICS LLC Posted Amount: $0.00 USD Broker Phone: (877) 210-5777 Load Type: Expedited Load Email: anthony@shipwithloop.com Vehicle required: LARGE STRAIGHT Posted: 08/12/2024 07:26 EST Pieces: 2 Expires: 08/12/2024 07:41 EST Weight: 1,599 lbs. Dock Level: No Dimensions: 72L x 32W x 48H Hazmat: No Stackable: No CSA/Fast Load: No Notes: 2 skids 72x32x48 1599lbs. PU 8/12 1300EST..DELIVER 8/13 0800CST..** MUST BE TRUE DOCK HIGH AND HANDLE FORKLIFT** BID ON LOAD If you would like to reply to the poster, simply reply to this email. © 2023 Solera, Inc.All Rights Reserved || www.solera.com (https://www.solera.com/) Privacy Policy (https://www.omnitracs.com/privacy-policy)",
-  "subject": "LARGE STRAIGHT from KINGS MOUNTAIN, NC to DYERSBURG, TN - 'Expedited Load' : 549 miles, 1599 lbs. - Posted by LOOP XPRESS (anthony@shipwithloop.com) - Alliance Posted Load"
-}
+[
+  {
+    "extractedOrder": "82163",
+    "subject": "SMALL STRAIGHT from MONTEREY, CA to NORTH LAS VEGAS, NV - 'Expedited Load' : 506 miles, 660 lbs. - Posted by EXCEL EXPEDITED LOGISTICS (vadym@excellogist.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "235",
+    "subject": "SMALL STRAIGHT from Cameron, TX to Berry Creek, CA - Small Straight - Straight Truck under 10000 pounds payload : 1923 miles, 6500 lbs. - Posted by FORESEE LOGISTICS INC (JValente@ForeseeLT.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1064901",
+    "subject": "LARGE STRAIGHT from MOONACHIE, NJ to MOCKSVILLE, NC - 'Expedited Load' : 592 miles, 4000 lbs. - Posted by MILLHOUSE LOGISTICS INC (brenda.ratushna@millhouse.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "28692",
+    "subject": "LARGE STRAIGHT from Nashville, TN to Bentonville, AR - Large Straight - Straight Truck over 10000 pounds payload : 558 miles, 8000 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (tyler.rosenthal@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "199712",
+    "subject": "LARGE STRAIGHT from Marion, AR to San Antonio, TX - Expedited Load - Typical Premium Freight Hot Shot Load : 720 miles, 8000 lbs. - Posted by AIT TRUCKLOAD SOLUTIONS INC (Jwilliams@aitworldwide.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "310586",
+    "subject": "LARGE STRAIGHT from Phoenix, AZ to Superior, AZ - Expedited Load - Typical Premium Freight Hot Shot Load : 68 miles, 3700 lbs. - Posted by SUNSET TRANSPORATION, INC. (Sheese@sunsettrans.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1029",
+    "subject": "SMALL STRAIGHT from Spring Lake, MI to Encino, CA - Small Straight - Straight Truck under 10000 pounds payload : 2184 miles, 3800 lbs. - Posted by WEL COMPANIES (justin.arbo@welcompanies.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "5307",
+    "subject": "LARGE STRAIGHT from Eugene, OR to Eagle Pass, TX - Expedited Load - Typical Premium Freight Hot Shot Load : 2137 miles, 7000 lbs. - Posted by HOT SHOT EXPRESS INC (t.soifer.hotshot@outlook.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "9076",
+    "subject": "LARGE STRAIGHT from La Porte, TX to Indianapolis, IN - Expedited Truck Load - Premium Freight that requires Truck Load : 1037 miles, 2783 lbs. - Posted by JACKO LOGISTICS LLC (Daven@pacwestfreight.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "155349",
+    "subject": "LARGE STRAIGHT from Calexico, CA to Pharr, TX - Expedited Load - Typical Premium Freight Hot Shot Load : 1401 miles, 2000 lbs. - Posted by FAST EXACT (quotes@fastexact.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1031872",
+    "subject": "SPRINTER from FORT MILL, SC to LOWELL, AR - 'Expedited Load' : 956 miles, 141 lbs. - Posted by GROUND FREIGHT SOLUTIONS LLC (daniel@groundfs.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "83639",
+    "subject": "LARGE STRAIGHT from Houston, TX to Brownsville, TX - Expedited Load - Typical Premium Freight Hot Shot Load : 356 miles, 1500 lbs. - Posted by PINNACLE PRO LOGISTICS LLC (garrett.m@pinnacleprologistics.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "28693",
+    "subject": "CARGO VAN from Santa Fe Springs, CA to Pasadena, TX - Cargo Van - Cargo Van Style : 1569 miles, 1200 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (dpearson@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "16826",
+    "subject": "CARGO VAN from Windham, ME to Fulton, MD - Expedited Load - Typical Premium Freight Hot Shot Load : 532 miles, 100 lbs. - Posted by TRANSMEDIK SPECIALIZED INC (Mike@Transmedikspecialized.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1031856",
+    "subject": "Box Truck 24ft, From Libertyville, IL, To Suwanee, GA,Van,778 miles,3000 lb,Ref #36521, Pro#/Ship ID: 1031856"
+  },
+  {
+    "extractedOrder": "115784",
+    "subject": "SPRINTER from San Diego, CA to Memphis, TN - Sprinter - Sprinter Van Style : 1833 miles, 265 lbs. - Posted by JOVIC INC. (ob@gopfc.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "170094",
+    "subject": "Cargo Van Small, From Atlanta, GA, To Las Vegas, NV,Van,1962 miles,0 lb,Ref #53368, Pro#/Ship ID: 170094"
+  },
+  {
+    "extractedOrder": "28694",
+    "subject": "SMALL STRAIGHT from Houston, TX to Sevierville, TN - Small Straight - Straight Truck under 10000 pounds payload : 952 miles, 3135 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (eschulte@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "28695",
+    "subject": "LARGE STRAIGHT from Pompano Beach, FL to Springfield, MA - Large Straight - Straight Truck over 10000 pounds payload : 1397 miles, 4000 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (dpearson@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "176460",
+    "subject": "CARGO VAN from STERLING, VA to MELBOURNE, FL - 'Expedited Load' : 890 miles, 25 lbs. - Posted by ASAP EXPEDITING & LOGISTICS LLC- G & H TRANSPORT (postedloads@asapexpediting.net) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "39403",
+    "subject": "SMALL STRAIGHT from Saint Louis, MO to La Mesa, NM - Expedited Load - Typical Premium Freight Hot Shot Load : 1158 miles, 6000 lbs. - Posted by AXIS WORLDWIDE SUPPLY CHAIN & LOGISTICS (KATHY@AXISWWSC.COM) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "",
+    "subject": "Request for Quote Ref.# 1180267 from Chantilly, VA, 20151, US to Chantilly, VA, 20151, US: 167 miles, 2000 lb was posted by Millhouse Logistics Inc."
+  },
+  {
+    "extractedOrder": "199713",
+    "subject": "SMALL STRAIGHT from Marion, AR to San Antonio, TX - Small Straight - Straight Truck under 10000 pounds payload : 740 miles, 5000 lbs. - Posted by AIT TRUCKLOAD SOLUTIONS INC (chgonzalez@aitworldwide.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "13997",
+    "subject": "LARGE STRAIGHT from CRANBURY, NJ to BALDWIN PARK, CA - 'Expedited Load' : 2741 miles, 1361 lbs. - Posted by TRANSGROUP EXPRESS LLC (JSuir@scangl.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "",
+    "subject": "Request for Quote Ref.# 1180170 from Romulus, MI, 48174, US to Clarksburg, MD, 20871, US: 483 miles, 1000 lb was posted by Millhouse Logistics Inc."
+  },
+  {
+    "extractedOrder": "7619",
+    "subject": "LARGE STRAIGHT from Hannibal, MO to Bensenville, IL - Large Straight - Straight Truck over 10000 pounds payload : 300 miles, 5410 lbs. - Posted by DELTA GROUP LOGISTICS INC (d.cvorak@deltagrouplog.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "28696",
+    "subject": "SMALL STRAIGHT from Atlanta, GA to Mount Juliet, TN - Small Straight - Straight Truck under 10000 pounds payload : 252 miles, 5000 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (tyler.rosenthal@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "",
+    "subject": "Request for Quote Ref.# 1180171 from Owatonna, MN, 55060, US to Troy, NY, 12180, US: 1216 miles, 3937 lb was posted by Millhouse Logistics Inc."
+  },
+  {
+    "extractedOrder": "",
+    "subject": "Request for Quote Ref.# 1180172 from Earth City, MO, 63045, US to NY, 11101, US: 969 miles, 422 lb was posted by Millhouse Logistics Inc."
+  },
+  {
+    "extractedOrder": "115785",
+    "subject": "SPRINTER from Mount Juliet, TN to Denver, CO - Sprinter - Sprinter Van Style : 1165 miles, 500 lbs. - Posted by JOVIC INC. (ob@gopfc.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "495",
+    "subject": "LARGE STRAIGHT from Pompano Beach, FL to Houston, TX - Expedited Load - Typical Premium Freight Hot Shot Load : 1152 miles, 975 lbs. - Posted by MAVERICK ACQUISITION VENTURES INC (LAX@MAVINC.COM) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "172129",
+    "subject": "LARGE STRAIGHT from Salt Lake City, UT to Las Vegas, NV - Expedited Load - Typical Premium Freight Hot Shot Load : 424 miles, 10000 lbs. - Posted by ONE8 FREIGHT LLC - CANDOR (jfox@candorexp.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1068934",
+    "subject": "LARGE STRAIGHT from MISSISSAUGA, ON to MONTREAL, QC - 'Expedited Load' : 347 miles, 5000 lbs. - Posted by BOUNCE LOGISTICS, LLC (parsa.nikou@rxo.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "938",
+    "subject": "LARGE STRAIGHT from Atlanta, GA to Mount Juliet, TN - Large Straight - Straight Truck over 10000 pounds payload : 252 miles, 5000 lbs. - Posted by INLAND TRANSPORT, INC. (bconyers@mcubedtransportation.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "176450",
+    "subject": "LARGE STRAIGHT from SALT LAKE CITY, UT to TUCSON, AZ - 'Expedited Load' : 839 miles, 2978 lbs. - Posted by ASAP EXPEDITING & LOGISTICS LLC- G & H TRANSPORT (postedloads@asapexpediting.net) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "28697",
+    "subject": "CARGO VAN from Elk Grove Village, IL to Ramsey, MN - Cargo Van - Cargo Van Style : 406 miles, 300 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (dpearson@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "7914",
+    "subject": "LARGE STRAIGHT from Bridgeport, WV to New Castle, DE - Large Straight - Straight Truck over 10000 pounds payload : 311 miles, 2317 lbs. - Posted by DAMCO DISTRIBUTION SERVICES INC DBA HUDD TRANSPORTATION (evan.cunningham@maersk.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "",
+    "subject": "Request for Quote Ref.# 1180174 from Cincinnati, OH, 45242, US to Middletown, CT, 06457, US: 749 miles, 170 lb was posted by Millhouse Logistics Inc."
+  },
+  {
+    "extractedOrder": "15039",
+    "subject": "LARGE STRAIGHT from Midway, KY to Hebron, KY - Small Straight - Straight Truck under 10000 pounds payload : 78 miles, 700 lbs. - Posted by FREIGHT FLEX (bookit@freightflex.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "23912",
+    "subject": "CARGO VAN from Griffin, GA to Stockton, CA - Cargo Van - Cargo Van Style : 2460 miles, 3300 lbs. - Posted by GEMINI TRANSPORT LLC (blaze@geminitrans.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "28698",
+    "subject": "SMALL STRAIGHT from Calexico, CA to Pharr, TX - Small Straight - Straight Truck under 10000 pounds payload : 1401 miles, 1866 lbs. - Posted by GLOBALTRANZ ENTERPRISES, LLC (bstokes@shipblx.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "82164",
+    "subject": "CARGO VAN from SHAKOPEE, MN to BESSEMER, MI - 'Expedited Load' : 288 miles, 910 lbs. - Posted by EXCEL EXPEDITED LOGISTICS (vadym@excellogist.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1031880",
+    "subject": "VAN from FARGO, ND to NEW SALEM, ND - 'Expedited Load' : 225 miles, 273 lbs. - Posted by GROUND FREIGHT SOLUTIONS LLC (holli@groundfs.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "1068935",
+    "subject": "LARGE STRAIGHT from CALEXICO, CA to PHARR, TX - 'Expedited Load' : 1403 miles, 1866 lbs. - Posted by BOUNCE LOGISTICS, LLC (michael.cody@rxo.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "83640",
+    "subject": "CARGO VAN from Rochester, NY to Rochester, NY - Expedited Load - Typical Premium Freight Hot Shot Load : 0 miles, 1010 lbs. - Posted by PINNACLE PRO LOGISTICS LLC (ppl@pinnacleprologistics.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "657011",
+    "subject": "CARGO VAN from San Diego, CA to Memphis, TN - Expedited Load - Typical Premium Freight Hot Shot Load : 1833 miles, 265 lbs. - Posted by S-2INTERNATIONAL LLC (jmcbrayer@s-2international.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "657011",
+    "subject": "CARGO VAN from San Diego, CA to Memphis, TN - Expedited Load - Typical Premium Freight Hot Shot Load : 1833 miles, 265 lbs. - Posted by S-2INTERNATIONAL LLC (jmcbrayer@s-2international.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "199714",
+    "subject": "LARGE STRAIGHT from Sumter, SC to Palatine, IL - Expedited Load - Typical Premium Freight Hot Shot Load : 878 miles, 6250 lbs. - Posted by AIT TRUCKLOAD SOLUTIONS INC (lcolaizzi@aitworldwide.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "656981",
+    "subject": "Cargo Van Small, From Des Moines, IA, To Tioga, ND,Van,821 miles,586 lb,Ref #168557, Pro#/Ship ID: 656981"
+  },
+  {
+    "extractedOrder": "1090117",
+    "subject": "LARGE STRAIGHT from Chicago, IL to Elkhart, IN - Large Straight - Straight Truck over 10000 pounds payload : 134 miles, 4000 lbs. - Posted by NTG - NOLAN TRANSPORTATION GROUP (anthony.saunders@ntgfreight.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "471103",
+    "subject": "CARGO VAN from El Segundo, CA to El Paso, TX - Sprinter - Sprinter Van Style : 832 miles, 1500 lbs. - Posted by AM TRANS EXPEDITE (kfrye@amtransexpedite.com) - Alliance Posted Load"
+  },
+  {
+    "extractedOrder": "13620",
+    "subject": "LARGE STRAIGHT from NORTH BERGEN, NJ to EDISON, NJ - 'Expedited Load' : 30 miles, 1590 lbs. - Posted by D & L TRANSPORT OTR LLC (sylectus@shiplime.com) - Alliance Posted Load"
+  }
+]

@@ -23,7 +23,7 @@ func SetupAndRun() {
 	app.Use(middleware.CORS())
 
 	// Apply the custom throttle middleware
-	app.Use(middleware.RequestThrottle())
+	//	app.Use(middleware.RequestThrottle())
 
 	// Set up routes
 	routes.Setup(app)
