@@ -3,19 +3,20 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
-	"html"
-	"io"
+	"io/ioutil"
 	"mime/quotedprintable"
 	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
 
 	"github.com/3milly4ever/parser-landstar/internal/parser"
+	"github.com/3milly4ever/parser-landstar/internal/sqs"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
+
+var requestsData []map[string]string
 
 func MailgunHandler(c *fiber.Ctx) error {
 	logrus.Info("Mailgun route accessed")
@@ -30,96 +31,61 @@ func MailgunHandler(c *fiber.Ctx) error {
 	// Extract specific fields
 	subject := formData.Get("subject")
 	bodyPlain := formData.Get("body-plain")
-	bodyHTML := formData.Get("body-html")
-
-	// Decode quoted-printable content (if applicable)
-	decodedBodyHTML, err := decodeQuotedPrintable(bodyHTML)
-	if err != nil {
-		logrus.Error("Error decoding quoted-printable body-html: ", err)
-		// Attempt to use the raw HTML body if decoding fails
-		decodedBodyHTML = bodyHTML
-	}
-
-	// Convert the HTML body to plain text
-	plainTextFromHTML := stripHTML(decodedBodyHTML)
-
-	// Replace escaped newline characters with spaces in the plain text body
-	formattedBodyPlain := strings.ReplaceAll(bodyPlain, "\\n", " ")
-	formattedBodyPlain = strings.ReplaceAll(formattedBodyPlain, "\\r", " ")
-
-	// Remove multiple consecutive spaces
-	formattedBodyPlain = regexp.MustCompile(`\s+`).ReplaceAllString(formattedBodyPlain, " ")
 
 	// Extract the order number from the plain text body
-	orderNumber := parser.ExtractOrderNumber(formattedBodyPlain)
+	orderNumber := parser.ExtractOrderNumber(bodyPlain)
 	logrus.Infof("Extracted Order Number: %s", orderNumber)
 
-	// Format the plain text body for better readability
-	formattedBodyPlain = parser.FormatEmailBody(formattedBodyPlain)
-	logrus.Infof("Formatted Body (plain text): \n%s", formattedBodyPlain)
-
-	// Prepare data to save to file including the cleaned body from HTML
+	// Prepare data to send to SQS
 	data := map[string]string{
 		"extractedOrder": orderNumber,
-		"formattedBody":  formattedBodyPlain,
-		"cleanedBody":    plainTextFromHTML,
 		"subject":        subject,
 	}
 
+	// Initialize SQS client
+	sqsClient, err := sqs.NewSQSClient("us-east-1", "https://sqs.us-east-1.amazonaws.com/333767869901/ParserQ", AWS_ACCESS_KEY, AWS_SECRET_KEY)
+	if err != nil {
+		logrus.Error("Error initializing SQS client: ", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to initialize SQS client")
+	}
+
 	// Save data to JSON file
-	if err := saveToJSONFile(data); err != nil {
+	if err := SaveToJSONFile(requestsData); err != nil {
 		logrus.Error("Error saving data to JSON file: ", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to save data")
 	}
 
+	// Return the order number and subject as JSON response
 	return c.JSON(fiber.Map{
-		"message":     "Email received, parsed, and saved",
-		"subject":     subject,
 		"orderNumber": orderNumber,
-		"bodyPlain":   formattedBodyPlain, // Send the formatted plain text body
-		"cleanedBody": plainTextFromHTML,  // Send the cleaned body
+		"subject":     subject,
 	})
 }
 
-// Improved decodeQuotedPrintable function with larger buffer
 func decodeQuotedPrintable(input string) (string, error) {
 	reader := quotedprintable.NewReader(bytes.NewReader([]byte(input)))
-	var buf bytes.Buffer
-	if _, err := io.Copy(&buf, reader); err != nil {
-		return "", err
+	decodedBytes, err := ioutil.ReadAll(reader)
+	if err != nil {
+		logrus.Warn("Error decoding quoted-printable body-html: ", err)
+		return input, err
 	}
-	return buf.String(), nil
+	return string(decodedBytes), nil
 }
 
 func stripHTML(input string) string {
-	// Decode HTML entities
-	decoded := html.UnescapeString(input)
-
-	// Remove all HTML tags
-	re := regexp.MustCompile(`<.*?>`)
-	cleaned := re.ReplaceAllString(decoded, "")
-
-	// Remove excessive whitespace and replace with a single space
-	cleaned = regexp.MustCompile(`\s+`).ReplaceAllString(cleaned, " ")
-
-	// Replace escaped newlines with actual newlines
-	cleaned = strings.ReplaceAll(cleaned, "\\n", "\n")
-	cleaned = strings.ReplaceAll(cleaned, "\\r", "\r")
-
-	// Trim leading and trailing whitespace
-	cleaned = strings.TrimSpace(cleaned)
-
-	return cleaned
+	// Remove HTML tags and return plain text
+	re := regexp.MustCompile("<[^>]*>")
+	return re.ReplaceAllString(input, "")
 }
 
-func saveToJSONFile(data map[string]string) error {
+func SaveToJSONFile(data []map[string]string) error {
 	// Define the directory to save the file
 	dir := "../../storage/emails"
 	if err := os.MkdirAll(dir, os.ModePerm); err != nil {
 		return err
 	}
 
-	// Define the file name (you could use a timestamp or a unique identifier)
+	// Define the file name
 	fileName := filepath.Join(dir, "email_data.json")
 
 	// Open the file for writing (create if not exists, truncate if exists)
@@ -129,9 +95,12 @@ func saveToJSONFile(data map[string]string) error {
 	}
 	defer file.Close()
 
-	// Encode the data as JSON and write to the file
+	// Create a new JSON encoder with indentation (pretty print)
 	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ") // Pretty print with indentation
+	encoder.SetIndent("", "  ")  // Pretty print with 2 spaces indentation
+	encoder.SetEscapeHTML(false) // Disable HTML escaping
+
+	// Encode the data as JSON and write to the file
 	if err := encoder.Encode(data); err != nil {
 		return err
 	}
