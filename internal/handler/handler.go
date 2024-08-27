@@ -12,6 +12,7 @@ import (
 
 	"github.com/3milly4ever/parser-landstar/internal/parser"
 	"github.com/3milly4ever/parser-landstar/internal/sqs"
+	config "github.com/3milly4ever/parser-landstar/pkg"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -42,23 +43,30 @@ func MailgunHandler(c *fiber.Ctx) error {
 		"subject":        subject,
 	}
 
-	// Initialize SQS client
-	sqsClient, err := sqs.NewSQSClient("us-east-1", "https://sqs.us-east-1.amazonaws.com/333767869901/ParserQ", AWS_ACCESS_KEY, AWS_SECRET_KEY)
+	sqsClient, err := sqs.NewSQSClient(
+		config.AppConfig.AWSRegion,
+		config.AppConfig.SQSQueueURL,
+		config.AppConfig.AWSAccessKeyID,
+		config.AppConfig.AWSSecretAccessKey,
+	)
 	if err != nil {
 		logrus.Error("Error initializing SQS client: ", err)
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to initialize SQS client")
 	}
 
-	// Save data to JSON file
-	if err := SaveToJSONFile(requestsData); err != nil {
-		logrus.Error("Error saving data to JSON file: ", err)
-		return c.Status(fiber.StatusInternalServerError).SendString("Failed to save data")
+	// Send the JSON message to SQS
+	if err := sqsClient.SendMessage(data); err != nil {
+		logrus.Error("Error sending message to SQS: ", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to send message to SQS")
+	} else {
+		logrus.Infof("Message sent to SQS with data: %+v", data)
 	}
 
-	// Return the order number and subject as JSON response
+	logrus.Info("Successfully sent message to SQS")
 	return c.JSON(fiber.Map{
-		"orderNumber": orderNumber,
+		"message":     "Email received and sent to SQS",
 		"subject":     subject,
+		"orderNumber": orderNumber,
 	})
 }
 

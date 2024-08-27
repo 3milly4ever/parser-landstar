@@ -8,9 +8,13 @@ import (
 )
 
 type Config struct {
-	ServerIP   string
-	ServerPort string
-	LogFile    string
+	ServerIP           string
+	ServerPort         string
+	LogFile            string
+	AWSRegion          string
+	AWSAccessKeyID     string
+	AWSSecretAccessKey string
+	SQSQueueURL        string
 }
 
 var AppConfig Config
@@ -25,9 +29,13 @@ func LoadConfig() {
 	}
 
 	AppConfig = Config{
-		ServerIP:   getEnv("SERVER_IP", "127.0.0.1"),
-		ServerPort: getEnv("SERVER_PORT", "54321"),
-		LogFile:    getEnv("LOG_FILE", "logs/app.log"),
+		ServerIP:           getEnv("SERVER_IP", "127.0.0.1"),
+		ServerPort:         getEnv("SERVER_PORT", "54321"),
+		LogFile:            getEnv("LOG_FILE", "logs/app.log"),
+		AWSRegion:          getEnv("AWS_REGION", "us-east-1"),
+		AWSAccessKeyID:     getEnv("AWS_ACCESS_KEY_ID", ""),
+		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
+		SQSQueueURL:        getEnv("SQS_QUEUE_URL", ""),
 	}
 }
 
