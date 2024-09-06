@@ -10,8 +10,13 @@ require (
 
 require (
 	github.com/andybalholm/cascadia v1.3.2 // indirect
+	github.com/go-sql-driver/mysql v1.7.0 // indirect
+	github.com/jinzhu/inflection v1.0.0 // indirect
+	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/jmespath/go-jmespath v0.4.0 // indirect
 	golang.org/x/net v0.24.0 // indirect
+	golang.org/x/text v0.14.0 // indirect
+	gorm.io/gorm v1.25.11 // indirect
 )
 
 require (
@@ -28,4 +33,5 @@ require (
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
 	golang.org/x/sys v0.19.0 // indirect
+	gorm.io/driver/mysql v1.5.7
 )

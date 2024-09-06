@@ -8,9 +8,12 @@ import (
 	"strings"
 	"time"
 
-	models "github.com/3milly4ever/parser-landstar/internal/model"
 	"github.com/3milly4ever/parser-landstar/internal/parser"
+	config "github.com/3milly4ever/parser-landstar/pkg"
 	"github.com/PuerkitoBio/goquery"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -38,23 +41,28 @@ func MailgunHandler(c *fiber.Ctx) error {
 	bodyHTML := formData.Get("body-html")
 	bodyPlain := formData.Get("body-plain")
 	messageID := formData.Get("Message-Id") // Extract the Message-ID field
+	replyTo := formData.Get("reply-to")     // Extract the Reply-To field
 
 	// Log the received data
 	logrus.WithFields(logrus.Fields{
 		"subject":    subject,
 		"message_id": messageID,
+		"body_plain": bodyPlain,
 	}).Info("Received email data")
 
 	var (
 		orderNumber                                               string
 		pickupZip, pickupCity, pickupState, pickupCountry         string
 		deliveryZip, deliveryCity, deliveryState, deliveryCountry string
-		pickupDateTime, deliveryDateTime                          string
+		pickupDateTime, deliveryDateTime                          time.Time
 		truckSize, notes                                          string
 		length, width, height, weight                             float64
 		pieces                                                    int
 		stackable, hazardous                                      bool
+		estimatedMiles                                            float64
 	)
+
+	layout := "2006-01-02 15:04:05" // Layout for MySQL datetime format
 
 	// Check if the HTML body exists and parse it
 	if bodyHTML != "" {
@@ -71,11 +79,12 @@ func MailgunHandler(c *fiber.Ctx) error {
 		orderNumber = parser.ExtractOrderNumberFromHTML(doc)
 		pickupZip, pickupCity, pickupState, pickupCountry = parser.ExtractLocationFromHTML(doc, "Pick Up")
 		deliveryZip, deliveryCity, deliveryState, deliveryCountry = parser.ExtractLocationFromHTML(doc, "Delivery")
-		pickupDateTime = parser.ExtractDateTimeStringFromHTML(doc, "Pick Up")
-		deliveryDateTime = parser.ExtractDateTimeStringFromHTML(doc, "Delivery")
+		pickupDateTime, _ = time.Parse(layout, parser.FormatDateTimeString(parser.ExtractDateTimeStringFromHTML(doc, "Pick Up")))
+		deliveryDateTime, _ = time.Parse(layout, parser.FormatDateTimeString(parser.ExtractDateTimeStringFromHTML(doc, "Delivery")))
 		truckSize = parser.ExtractTruckSizeFromHTML(doc)
 		notes = parser.ExtractNotesFromHTML(doc)
 		length, width, height, weight, pieces, stackable, hazardous = parser.ExtractOrderItemsFromHTML(doc)
+		estimatedMiles = parser.ExtractDistanceFromHTML(doc) // Extract the distance in miles
 
 	} else if bodyPlain != "" {
 		logrus.Warn("No HTML body found, falling back to plain text")
@@ -84,81 +93,74 @@ func MailgunHandler(c *fiber.Ctx) error {
 		orderNumber = parser.ExtractOrderNumber(bodyPlain)
 		pickupZip, pickupCity, pickupState, pickupCountry = parser.ExtractLocation(bodyPlain, "Pick Up")
 		deliveryZip, deliveryCity, deliveryState, deliveryCountry = parser.ExtractLocation(bodyPlain, "Delivery")
-		pickupDateTime = parser.ExtractDateTimeString(bodyPlain, "Pick Up")
-		deliveryDateTime = parser.ExtractDateTimeString(bodyPlain, "Delivery")
+		pickupDateTime, _ = time.Parse(layout, parser.FormatDateTimeString(parser.ExtractDateTimeString(bodyPlain, "Pick Up")))
+		deliveryDateTime, _ = time.Parse(layout, parser.FormatDateTimeString(parser.ExtractDateTimeString(bodyPlain, "Delivery")))
 		truckSize = parser.ExtractTruckSize(bodyPlain)
 		notes = parser.ExtractNotes(bodyPlain)
 		length, width, height, weight, pieces, stackable, hazardous = parser.ExtractOrderItems(bodyPlain)
+		estimatedMiles = parser.ExtractDistance(bodyPlain) // Extract the distance in miles
 	}
 
-	// Create the Order struct
-	order := models.Order{
-		OrderNumber:        orderNumber,
-		PickupLocation:     parser.FormatLocationLabel(pickupZip, pickupCity, pickupState, pickupCountry),
-		DeliveryLocation:   parser.FormatLocationLabel(deliveryZip, deliveryCity, deliveryState, deliveryCountry),
-		PickupDate:         pickupDateTime,   // Now a string
-		DeliveryDate:       deliveryDateTime, // Now a string
-		SuggestedTruckSize: truckSize,
-		Notes:              notes,
-		CreatedAt:          time.Now().Format("2006-01-02 15:04:05"),
-		UpdatedAt:          time.Now().Format("2006-01-02 15:04:05"),
-		PickupZip:          pickupZip,
-		DeliveryZip:        deliveryZip,
+	// Prepare data to be sent to SQS
+	data := map[string]interface{}{
+		"orderNumber":         orderNumber,
+		"pickupLocation":      parser.FormatLocationLabel(pickupZip, pickupCity, pickupState, pickupCountry),
+		"deliveryLocation":    parser.FormatLocationLabel(deliveryZip, deliveryCity, deliveryState, deliveryCountry),
+		"pickupDate":          pickupDateTime,
+		"deliveryDate":        deliveryDateTime,
+		"suggestedTruckSize":  truckSize,
+		"notes":               notes,
+		"pickupZip":           pickupZip,
+		"deliveryZip":         deliveryZip,
+		"pickupLabel":         parser.FormatLocationLabel(pickupZip, pickupCity, pickupState, pickupCountry),
+		"pickupCountryCode":   pickupCountry,
+		"pickupCountryName":   "United States",
+		"pickupStateCode":     pickupState,
+		"pickupState":         pickupState,
+		"pickupCity":          pickupCity,
+		"pickupPostalCode":    pickupZip,
+		"deliveryLabel":       parser.FormatLocationLabel(deliveryZip, deliveryCity, deliveryState, deliveryCountry),
+		"deliveryCountryCode": deliveryCountry,
+		"deliveryCountryName": "United States",
+		"deliveryStateCode":   deliveryState,
+		"deliveryState":       deliveryState,
+		"deliveryCity":        deliveryCity,
+		"deliveryPostalCode":  deliveryZip,
+		"estimatedMiles":      estimatedMiles,
+		"length":              length,
+		"width":               width,
+		"height":              height,
+		"weight":              weight,
+		"pieces":              pieces,
+		"stackable":           stackable,
+		"hazardous":           hazardous,
+		"replyTo":             replyTo,
+		"subject":             subject,
+		"messageID":           messageID,
+		"createdAt":           time.Now(),
+		"updatedAt":           time.Now(),
 	}
 
-	// Create the OrderLocation struct (fields will remain empty if not present in email)
-	orderLocation := models.OrderLocation{
-		OrderID:             1, // This should be the order ID from the database
-		PickupLabel:         parser.FormatLocationLabel(pickupZip, pickupCity, pickupState, pickupCountry),
-		PickupCountryCode:   pickupCountry,
-		PickupCountryName:   "United States", // Static, or derived based on country code
-		PickupStateCode:     pickupState,
-		PickupState:         pickupState, // Optional full state name
-		PickupCity:          pickupCity,
-		PickupPostalCode:    pickupZip,
-		DeliveryLabel:       parser.FormatLocationLabel(deliveryZip, deliveryCity, deliveryState, deliveryCountry),
-		DeliveryCountryCode: deliveryCountry,
-		DeliveryCountryName: "United States", // Static, or derived based on country code
-		DeliveryStateCode:   deliveryState,
-		DeliveryState:       deliveryState, // Optional full state name
-		DeliveryCity:        deliveryCity,
-		DeliveryPostalCode:  deliveryZip,
-		EstimatedMiles:      435, // Placeholder or parsed from the email
-		CreatedAt:           time.Now().Format("2006-01-02 15:04:05"),
-		UpdatedAt:           time.Now().Format("2006-01-02 15:04:05"),
+	// Marshal the data to JSON
+	messageBody, err := json.Marshal(data)
+	if err != nil {
+		logrus.Error("Error marshaling data to JSON: ", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to prepare message")
 	}
 
-	// Create the OrderItem struct
-	orderItem := models.OrderItem{
-		OrderID:   1, // This should be the order ID from the database
-		Length:    length,
-		Width:     width,
-		Height:    height,
-		Weight:    weight,
-		Pieces:    pieces,
-		Stackable: stackable,
-		Hazardous: hazardous,
-		CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
-		UpdatedAt: time.Now().Format("2006-01-02 15:04:05"),
-	}
-
-	// Create the OrderEmail struct
-	orderEmail := models.OrderEmail{
-		ReplyTo:   "jhenry@440transit.com", // Extracted if dynamic
-		Subject:   subject,
-		MessageID: messageID,
-		OrderID:   1, // This should be the order ID from the database
-		CreatedAt: time.Now().Format("2006-01-02 15:04:05"),
-		UpdatedAt: time.Now().Format("2006-01-02 15:04:05"),
-	}
-
-	// Return the parsed structs as JSON in the response
-	return c.JSON(fiber.Map{
-		"order":          order,
-		"order_location": orderLocation,
-		"order_item":     orderItem,
-		"order_email":    orderEmail,
+	// Send the message to SQS
+	sqsClient := sqs.New(session.Must(session.NewSession()))
+	_, err = sqsClient.SendMessage(&sqs.SendMessageInput{
+		QueueUrl:    aws.String(config.AppConfig.SQSQueueURL),
+		MessageBody: aws.String(string(messageBody)),
 	})
+	if err != nil {
+		logrus.Error("Failed to send message to SQS: ", err)
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to send message")
+	}
+
+	logrus.Info("Message successfully sent to SQS")
+	return c.SendString("Email data parsed and sent to SQS successfully")
 }
 
 // func decodeQuotedPrintable(input string) (string, error) {

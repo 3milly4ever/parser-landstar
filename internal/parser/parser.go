@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/sirupsen/logrus"
@@ -38,7 +39,27 @@ func ExtractDateTimeStringFromHTML(doc *goquery.Document, event string) string {
 			datetimeString = s.Find("td").Eq(6).Text()
 		}
 	})
-	return strings.TrimSpace(datetimeString)
+	return FormatDateTimeString(datetimeString)
+}
+
+// formatDateTimeString reformats the datetime string to MySQL format.
+func FormatDateTimeString(datetimeString string) string {
+	// Extract the date and time without the timezone
+	re := regexp.MustCompile(`(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})`)
+	matches := re.FindStringSubmatch(datetimeString)
+	if len(matches) > 2 {
+		datePart := matches[1]
+		timePart := matches[2]
+		combined := datePart + " " + timePart
+
+		// Parse the date and time without timezone
+		parsedTime, err := time.Parse("2006-01-02 15:04", combined)
+		if err == nil {
+			// Format as MySQL datetime
+			return parsedTime.Format("2006-01-02 15:04:05")
+		}
+	}
+	return ""
 }
 
 // ExtractTruckSizeFromHTML extracts the suggested truck size from the HTML body.
@@ -151,10 +172,10 @@ func ExtractLocation(body, event string) (string, string, string, string) { // r
 
 // ExtractDateTimeString extracts the datetime as a string associated with the pickup or delivery event from the plain text body.
 func ExtractDateTimeString(body, event string) string {
-	re := regexp.MustCompile(event + `.*?(\d{4}-\d{2}-\d{2} \d{2}:\d{2} [A-Z]{3} \(UTC[^\)]+\))`)
+	re := regexp.MustCompile(event + `.*?(\d{4}-\d{2}-\d{2} \d{2}:\d{2}) [A-Z]{3} \(UTC[^\)]+\)`)
 	matches := re.FindStringSubmatch(body)
 	if len(matches) > 1 {
-		return matches[1]
+		return FormatDateTimeString(matches[1])
 	}
 	return ""
 }
@@ -207,4 +228,25 @@ func FormatLocationLabel(zip, city, state, country string) string {
 		return zip + ", " + city + ", " + state + ", " + country
 	}
 	return city + ", " + state + ", " + country
+}
+
+// ExtractDistanceFromHTML extracts the distance in miles from the HTML body.
+func ExtractDistanceFromHTML(doc *goquery.Document) float64 {
+	distanceText := doc.Find("p:contains('Distance')").Text()
+	re := regexp.MustCompile(`Distance:\s*(\d+)\s*mi`)
+	matches := re.FindStringSubmatch(distanceText)
+	if len(matches) > 1 {
+		return parseFloat(matches[1])
+	}
+	return 0
+}
+
+// ExtractDistance extracts the distance in miles from the plain text body.
+func ExtractDistance(body string) float64 {
+	re := regexp.MustCompile(`(?i)Distance:\s*(\d+)\s*mi`)
+	matches := re.FindStringSubmatch(body)
+	if len(matches) > 1 {
+		return parseFloat(matches[1])
+	}
+	return 0
 }

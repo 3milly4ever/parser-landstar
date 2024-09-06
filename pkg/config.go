@@ -15,6 +15,7 @@ type Config struct {
 	AWSAccessKeyID     string
 	AWSSecretAccessKey string
 	SQSQueueURL        string
+	MySQLDSN           string
 }
 
 var AppConfig Config
@@ -36,6 +37,7 @@ func LoadConfig() {
 		AWSAccessKeyID:     getEnv("AWS_ACCESS_KEY_ID", ""),
 		AWSSecretAccessKey: getEnv("AWS_SECRET_ACCESS_KEY", ""),
 		SQSQueueURL:        getEnv("SQS_QUEUE_URL", ""),
+		MySQLDSN:           getEnv("MYSQL_DSN", ""),
 	}
 }
 
