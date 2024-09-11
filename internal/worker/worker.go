@@ -251,6 +251,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	deliveryState := getStringValue(data["deliveryState"])
 	deliveryCountryCode := getStringValue(data["deliveryCountryCode"])
 	orderNumber := getStringValue(data["orderNumber"])
+	truckTypeID := getIntValue(data["truckTypeID"]) // Ensure this is extracted
 
 	// Log the extracted fields to check if they are empty
 	logrus.WithFields(logrus.Fields{
@@ -263,6 +264,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		"deliveryState":       deliveryState,
 		"deliveryCountryCode": deliveryCountryCode,
 		"orderNumber":         orderNumber,
+		"truckTypeID":         truckTypeID,
 	}).Info("Extracted key fields")
 
 	// Check if key fields are missing or empty
@@ -361,11 +363,13 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		orderTypeID = 1
 	case "Large Straight":
 		orderTypeID = 3
-	default:
+	case "Sprinter":
 		orderTypeID = 2
+	default:
+		orderTypeID = 3
 	}
 
-	// Create and save the Order record to the database
+	// Create and save the Order record to the database, including TruckTypeID
 	order := models.Order{
 		OrderNumber:        getStringValue(data["orderNumber"]),
 		PickupLocation:     getStringValue(data["pickupLocation"]),
@@ -379,6 +383,8 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		PickupZip:          getStringValue(data["pickupZip"]),
 		DeliveryZip:        getStringValue(data["deliveryZip"]),
 		OrderTypeID:        orderTypeID,
+		TruckTypeID:        truckTypeID, // Ensure TruckTypeID from SQS is used
+		EstimatedMiles:     getIntValue(data["estimatedMiles"]),
 	}
 
 	if err := worker.db.Create(&order).Error; err != nil {
@@ -422,6 +428,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	logrus.WithField("order_location_id", orderLocation.ID).Info("OrderLocation saved to database")
 
 	// Create and save the OrderItem record to the database
+
 	orderItem := models.OrderItem{
 		OrderID:   order.ID,
 		Length:    getFloatValue(data["length"]),
