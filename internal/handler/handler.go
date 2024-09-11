@@ -41,15 +41,31 @@ func MailgunHandler(c *fiber.Ctx) error {
 	bodyHTML := formData.Get("body-html")
 	bodyPlain := formData.Get("body-plain")
 	messageID := formData.Get("Message-Id") // Extract the Message-ID field
-	replyTo := formData.Get("reply-to")     // Extract the Reply-To field
 
-	// Log the received data
+	// Log the received data for debugging
 	logrus.WithFields(logrus.Fields{
 		"subject":    subject,
 		"message_id": messageID,
 		"body_plain": bodyPlain,
+		"body_html":  bodyHTML,
 	}).Info("Received email data")
 
+	// Extract reply-to from plain text body
+	var replyTo string
+	if bodyPlain != "" {
+		logrus.Info("Parsing plain text body for 'replyTo'")
+		replyTo = parser.ExtractReplyTo(bodyPlain) // Extract ReplyTo from plain text body
+		logrus.WithField("replyTo", replyTo).Info("Extracted 'replyTo' from plain text body")
+	}
+
+	// Fallback to form 'reply-to' if not found in plain text
+	if replyTo == "" {
+		logrus.Warn("No 'replyTo' field found in the plain text body, falling back to form data")
+		replyTo = formData.Get("reply-to")
+		logrus.WithField("replyTo", replyTo).Info("Extracted 'replyTo' from form data")
+	}
+
+	// Check if HTML body exists and parse it if available
 	var (
 		orderNumber                                               string
 		pickupZip, pickupCity, pickupState, pickupCountry         string
@@ -64,7 +80,6 @@ func MailgunHandler(c *fiber.Ctx) error {
 
 	layout := "2006-01-02 15:04:05" // Layout for MySQL datetime format
 
-	// Check if the HTML body exists and parse it
 	if bodyHTML != "" {
 		logrus.Info("Parsing HTML body")
 
@@ -134,7 +149,7 @@ func MailgunHandler(c *fiber.Ctx) error {
 		"pieces":              pieces,
 		"stackable":           stackable,
 		"hazardous":           hazardous,
-		"replyTo":             replyTo,
+		"replyTo":             replyTo, // ReplyTo included here
 		"subject":             subject,
 		"messageID":           messageID,
 		"createdAt":           time.Now(),
