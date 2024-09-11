@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -249,4 +250,49 @@ func ExtractDistance(body string) float64 {
 		return parseFloat(matches[1])
 	}
 	return 0
+}
+
+// Ensure the function extracts email from `mailto:` links in HTML
+func ExtractReplyToFromHTML(doc *goquery.Document) string {
+	replyTo := ""
+	doc.Find("a[href^='mailto:']").Each(func(index int, item *goquery.Selection) {
+		href, exists := item.Attr("href")
+		if exists && strings.HasPrefix(href, "mailto:") {
+			replyTo = strings.TrimPrefix(href, "mailto:") // Strip 'mailto:' prefix
+		}
+	})
+	return replyTo
+}
+
+// This is a basic email regex pattern
+var emailRegex = regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}`)
+
+// ExtractReplyTo looks for the phrase "reply to" and extracts the email address after it.
+func ExtractReplyTo(body string) string {
+	// Log the body to debug what's inside it
+	log.Printf("Body content before searching for reply-to:\n%s\n", body)
+
+	// Convert body to lowercase for case-insensitive matching
+	lowerBody := strings.ToLower(body)
+
+	// Look for "reply to" followed by an email address
+	keyword := "reply to"
+	keywordIndex := strings.Index(lowerBody, keyword)
+
+	if keywordIndex != -1 {
+		// Extract the portion of the text after "reply to"
+		afterKeyword := body[keywordIndex+len(keyword):]
+
+		// Log the text after "reply to" for debugging
+		log.Printf("Text after 'reply to': %s\n", afterKeyword)
+
+		// Use the email regex to find the email in the extracted portion
+		matches := emailRegex.FindString(afterKeyword)
+		if matches != "" {
+			return matches // Return the first matched email
+		}
+	}
+
+	// If no email is found, return empty string
+	return ""
 }
