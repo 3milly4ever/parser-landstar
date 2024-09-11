@@ -24,6 +24,11 @@ var (
 		Help: "Total number of messages failed during processing",
 	})
 
+	MessagesParsed = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "sqs_worker_messages_parsed_total",
+		Help: "Total number of messages successfully parsed",
+	})
+
 	ProcessingDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
 		Name:    "sqs_worker_message_processing_duration_seconds",
 		Help:    "Duration of message processing in seconds",

@@ -9,15 +9,16 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
+	"github.com/3milly4ever/parser-landstar/internal/metrics"
 	models "github.com/3milly4ever/parser-landstar/internal/model"
 	config "github.com/3milly4ever/parser-landstar/pkg"
-	"github.com/sirupsen/logrus"
-
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
@@ -230,11 +231,15 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	// Log the raw message
 	logrus.WithField("raw_message", *message.Body).Info("Processing SQS message")
 
+	// Increment the messagesReceived counter
+	metrics.MessagesReceived.Inc()
+
 	// Parse the message body
 	var data map[string]interface{}
 	err := json.Unmarshal([]byte(*message.Body), &data)
 	if err != nil {
 		logrus.Error("Error unmarshalling message: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 
@@ -270,7 +275,8 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	// Check if key fields are missing or empty
 	if pickupCity == "" || deliveryCity == "" || orderNumber == "" {
 		logrus.Warn("Missing key fields: pickupCity, deliveryCity, or orderNumber is empty. Skipping message.")
-		return nil // Skip processing this message
+		metrics.MessagesFailed.Inc() // Increment the failure counter
+		return nil                   // Skip processing this message
 	}
 
 	// Extract the reply-to email from the parsed data
@@ -302,6 +308,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		pickupLat, pickupLng, pickupCounty, err = GeocodeLocation(pickupAddress)
 		if err != nil {
 			logrus.Error("Failed to geocode pickup location: ", err)
+			metrics.MessagesFailed.Inc() // Increment the failure counter
 			return err
 		}
 		logrus.WithFields(logrus.Fields{
@@ -315,6 +322,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		deliveryLat, deliveryLng, deliveryCounty, err = GeocodeLocation(deliveryAddress)
 		if err != nil {
 			logrus.Error("Failed to geocode delivery location: ", err)
+			metrics.MessagesFailed.Inc() // Increment the failure counter
 			return err
 		}
 		logrus.WithFields(logrus.Fields{
@@ -347,28 +355,32 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	pickupDate, err := parseDateTime(getStringValue(data["pickupDate"]))
 	if err != nil {
 		logrus.WithField("pickupDate", data["pickupDate"]).Error("Failed to parse pickupDate: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 
 	deliveryDate, err := parseDateTime(getStringValue(data["deliveryDate"]))
 	if err != nil {
 		logrus.WithField("deliveryDate", data["deliveryDate"]).Error("Failed to parse deliveryDate: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 
 	// Determine OrderTypeID based on SuggestedTruckSize
+	// Determine OrderTypeID based on SuggestedTruckSize (case-insensitive)
 	var orderTypeID int
-	switch getStringValue(data["suggestedTruckSize"]) {
-	case "Small Straight":
+	truckSize := strings.ToLower(getStringValue(data["suggestedTruckSize"])) // Convert to lowercase
+
+	switch truckSize {
+	case "small straight":
 		orderTypeID = 1
-	case "Large Straight":
+	case "large straight":
 		orderTypeID = 3
-	case "Sprinter":
+	case "sprinter":
 		orderTypeID = 2
 	default:
 		orderTypeID = 3
 	}
-
 	// Create and save the Order record to the database, including TruckTypeID
 	order := models.Order{
 		OrderNumber:        getStringValue(data["orderNumber"]),
@@ -389,6 +401,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	if err := worker.db.Create(&order).Error; err != nil {
 		logrus.Error("Failed to save order: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 	logrus.WithField("order_id", order.ID).Info("Order saved to database")
@@ -423,12 +436,12 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	if err := worker.db.Create(&orderLocation).Error; err != nil {
 		logrus.Error("Failed to save order location: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 	logrus.WithField("order_location_id", orderLocation.ID).Info("OrderLocation saved to database")
 
 	// Create and save the OrderItem record to the database
-
 	orderItem := models.OrderItem{
 		OrderID:   order.ID,
 		Length:    getFloatValue(data["length"]),
@@ -444,6 +457,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	if err := worker.db.Create(&orderItem).Error; err != nil {
 		logrus.Error("Failed to save order item: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 	logrus.WithField("order_item_id", orderItem.ID).Info("OrderItem saved to database")
@@ -460,6 +474,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	if err := worker.db.Create(&orderEmail).Error; err != nil {
 		logrus.Error("Failed to save order email: ", err)
+		metrics.MessagesFailed.Inc() // Increment the failure counter
 		return err
 	}
 	logrus.WithField("order_email_id", orderEmail.ID).Info("OrderEmail saved to database")
@@ -471,6 +486,10 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		"replyTo":     replyTo,
 		"subject":     orderEmail.Subject,
 	}).Info("Successfully processed and saved order")
+
+	// Increment the messagesParsed counter after successful processing
+	metrics.MessagesParsed.Inc()
+
 	return nil
 }
 
