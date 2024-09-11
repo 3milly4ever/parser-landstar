@@ -16,6 +16,8 @@ type Order struct {
 	PickupZip          string    `json:"pickup_zip"`
 	DeliveryZip        string    `json:"delivery_zip"`
 	OrderTypeID        int       `json:"order_type_id"`
+	EstimatedMiles     int       `json:"estimated_miles"`
+	TruckTypeID        int       `json:"truck_type_id"`
 }
 
 type OrderLocation struct {

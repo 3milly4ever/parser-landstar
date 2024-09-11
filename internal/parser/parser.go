@@ -18,17 +18,27 @@ func ExtractOrderNumberFromHTML(doc *goquery.Document) string {
 	return ExtractOrderNumber(orderNumberText) // Reuse the regex-based extraction function
 }
 
-// ExtractLocationFromHTML extracts the pickup or delivery location from the HTML body.
-func ExtractLocationFromHTML(doc *goquery.Document, event string) (string, string, string, string) { // returns zip, city, state, country
+func ExtractLocationFromHTML(doc *goquery.Document, event string) (string, string, string, string) {
 	var zip, city, state, country string
+
+	// Find the correct table row based on the event name (Pick Up or Delivery)
 	doc.Find("tr").Each(func(i int, s *goquery.Selection) {
-		if s.Find("td").Eq(1).Text() == event {
-			city = s.Find("td").Eq(2).Text()
-			state = s.Find("td").Eq(3).Text()
-			zip = s.Find("td").Eq(4).Text()
-			country = s.Find("td").Eq(5).Text()
+		if strings.Contains(s.Find("td").Eq(1).Text(), event) {
+			city = strings.TrimSpace(s.Find("td").Eq(2).Text())
+			state = strings.TrimSpace(s.Find("td").Eq(3).Text())
+			zip = strings.TrimSpace(s.Find("td").Eq(4).Text())
+			country = strings.TrimSpace(s.Find("td").Eq(5).Text())
 		}
 	})
+
+	logrus.WithFields(logrus.Fields{
+		"event":   event,
+		"city":    city,
+		"state":   state,
+		"zip":     zip,
+		"country": country,
+	}).Info("Extracted location data")
+
 	return zip, city, state, country
 }
 
@@ -231,27 +241,6 @@ func FormatLocationLabel(zip, city, state, country string) string {
 	return city + ", " + state + ", " + country
 }
 
-// ExtractDistanceFromHTML extracts the distance in miles from the HTML body.
-func ExtractDistanceFromHTML(doc *goquery.Document) float64 {
-	distanceText := doc.Find("p:contains('Distance')").Text()
-	re := regexp.MustCompile(`Distance:\s*(\d+)\s*mi`)
-	matches := re.FindStringSubmatch(distanceText)
-	if len(matches) > 1 {
-		return parseFloat(matches[1])
-	}
-	return 0
-}
-
-// ExtractDistance extracts the distance in miles from the plain text body.
-func ExtractDistance(body string) float64 {
-	re := regexp.MustCompile(`(?i)Distance:\s*(\d+)\s*mi`)
-	matches := re.FindStringSubmatch(body)
-	if len(matches) > 1 {
-		return parseFloat(matches[1])
-	}
-	return 0
-}
-
 // Ensure the function extracts email from `mailto:` links in HTML
 func ExtractReplyToFromHTML(doc *goquery.Document) string {
 	replyTo := ""
@@ -295,4 +284,43 @@ func ExtractReplyTo(body string) string {
 
 	// If no email is found, return empty string
 	return ""
+}
+
+// ExtractEstimatedMiles extracts the estimated distance in miles from the HTML or plain text body.
+func ExtractEstimatedMiles(doc *goquery.Document, plainTextBody string) int {
+	// Try extracting from HTML first
+	distance := ExtractDistanceFromHTML(doc)
+	if distance > 0 {
+		return distance
+	}
+
+	// Fallback to plain text extraction if HTML parsing fails
+	return ExtractDistance(plainTextBody)
+}
+
+// ExtractDistanceFromHTML extracts the distance in miles from the HTML body.
+func ExtractDistanceFromHTML(doc *goquery.Document) int {
+	distanceText := doc.Find("p:contains('Distance')").Text()
+	re := regexp.MustCompile(`Distance:\s*(\d+)\s*mi`)
+	matches := re.FindStringSubmatch(distanceText)
+	if len(matches) > 1 {
+		return parseInt(matches[1])
+	}
+	return 0
+}
+
+// ExtractDistance extracts the distance in miles from the plain text body.
+func ExtractDistance(body string) int {
+	re := regexp.MustCompile(`(?i)Distance:\s*(\d+)\s*mi`)
+	matches := re.FindStringSubmatch(body)
+	if len(matches) > 1 {
+		return parseInt(matches[1])
+	}
+	return 0
+}
+
+// Helper function to convert string to int
+func parseInt(value string) int {
+	result, _ := strconv.Atoi(value)
+	return result
 }
