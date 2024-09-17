@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/3milly4ever/parser-landstar/internal/metrics"
 	"github.com/3milly4ever/parser-landstar/internal/server"
 	"github.com/3milly4ever/parser-landstar/internal/worker"
 	config "github.com/3milly4ever/parser-landstar/pkg"
@@ -26,6 +27,8 @@ func main() {
 
 	// Start the SQS worker in a separate goroutine
 	go sqsWorker.Start()
+
+	metrics.InitializePrometheus()
 
 	// Wait for a signal to gracefully shut down the server and worker
 	sigChan := make(chan os.Signal, 1)

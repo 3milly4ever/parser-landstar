@@ -43,6 +43,7 @@ func InitializePrometheus() {
 	prometheus.MustRegister(MessagesProcessed)
 	prometheus.MustRegister(MessagesFailed)
 	prometheus.MustRegister(ProcessingDuration)
+	prometheus.MustRegister(MessagesParsed)
 
 	// Start a HTTP server for Prometheus to scrape metrics
 	http.Handle("/metrics", promhttp.Handler())
