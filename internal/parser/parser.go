@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"fmt"
 	"log"
 	"regexp"
 	"strconv"
@@ -12,16 +13,298 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-type EmailParser interface {
-	Parse(bodyHTML, bodyPlain string) (ParserResult, error)
-}
+type LandstarParser struct{}
 
+// ParserResult holds the parsed data
 type ParserResult struct {
 	Order         models.Order
 	OrderLocation models.OrderLocation
 	OrderItem     models.OrderItem
 	OrderEmail    models.OrderEmail
 }
+
+// Parse parses the email content and returns a ParserResult
+func (p *LandstarParser) Parse(bodyHTML, bodyPlain string) (*ParserResult, error) {
+	if bodyHTML == "" {
+		return nil, fmt.Errorf("bodyHTML is empty")
+	}
+
+	parserResult, err := ExtractDataFromLandstarHTML(bodyHTML)
+	if err != nil {
+		return nil, err
+	}
+
+	return parserResult, nil
+}
+
+// ExtractDataFromLandstarHTML extracts data from the Landstar HTML email content
+func ExtractDataFromLandstarHTML(bodyHTML string) (*ParserResult, error) {
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse HTML: %v", err)
+	}
+
+	// Initialize models
+	order := models.Order{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	orderLocation := models.OrderLocation{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	orderItem := models.OrderItem{
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+
+	// Extract OrderNumber
+	order.OrderNumber = ExtractOrderNumberFromLandstarHTML(doc)
+	logrus.Infof("Extracted Order Number: %s", order.OrderNumber)
+
+	// Extract Trailer Type (SuggestedTruckSize)
+	order.SuggestedTruckSize = ExtractTrailerTypeFromLandstarHTML(doc)
+	order.OriginalTruckSize = order.SuggestedTruckSize
+	logrus.Infof("Extracted Suggested Truck Size: %s", order.SuggestedTruckSize)
+
+	// Extract EstimatedMiles
+	order.EstimatedMiles = ExtractMilesFromLandstarHTML(doc)
+	orderLocation.EstimatedMiles = float64(order.EstimatedMiles)
+	logrus.Infof("Extracted Estimated Miles: %d", order.EstimatedMiles)
+
+	// Extract Origin and PickupDate
+	order.PickupLocation = ExtractOriginFromLandstarHTML(doc)
+	orderLocation.PickupLabel = order.PickupLocation
+	logrus.Infof("Extracted Pickup Location: %s", order.PickupLocation)
+
+	pickupDate, err := ExtractPickupDateFromLandstarHTML(doc)
+	if err == nil {
+		order.PickupDate = pickupDate
+		logrus.Infof("Extracted Pickup Date: %s", order.PickupDate)
+	} else {
+		logrus.Warnf("Failed to parse Pickup Date: %v", err)
+	}
+
+	// Extract Destination and DeliveryDate
+	order.DeliveryLocation = ExtractDestinationFromLandstarHTML(doc)
+	orderLocation.DeliveryLabel = order.DeliveryLocation
+	logrus.Infof("Extracted Delivery Location: %s", order.DeliveryLocation)
+
+	deliveryDate, err := ExtractDeliveryDateFromLandstarHTML(doc)
+	if err == nil {
+		order.DeliveryDate = deliveryDate
+		logrus.Infof("Extracted Delivery Date: %s", order.DeliveryDate)
+	} else {
+		logrus.Warnf("Failed to parse Delivery Date: %v", err)
+	}
+
+	// Extract Notes from Comments
+	order.Notes = ExtractNotesFromLandstarHTML(doc)
+	logrus.Infof("Extracted Notes: %s", order.Notes)
+
+	// Extract Commodity details (OrderItem)
+	length, width, height, weight, hazardous := ExtractCommodityFromLandstarHTML(doc)
+	orderItem.Length = length
+	orderItem.Width = width
+	orderItem.Height = height
+	orderItem.Weight = weight
+	orderItem.Hazardous = hazardous
+	logrus.Infof("Extracted Commodity - Length: %f, Width: %f, Height: %f, Weight: %f, Hazardous: %t", length, width, height, weight, hazardous)
+
+	// Pieces and Stackable are not specified; set default values
+	orderItem.Pieces = 1
+	orderItem.Stackable = false
+
+	// Extract City, State from Origin and Destination
+	originCity, originState := parseCityState(order.PickupLocation)
+	orderLocation.PickupCity = originCity
+	orderLocation.PickupState = originState
+
+	destCity, destState := parseCityState(order.DeliveryLocation)
+	orderLocation.DeliveryCity = destCity
+	orderLocation.DeliveryState = destState
+
+	// Set default country codes
+	orderLocation.PickupCountryCode = "US"
+	orderLocation.DeliveryCountryCode = "US"
+	orderLocation.PickupCountryName = "United States"
+	orderLocation.DeliveryCountryName = "United States"
+
+	// Create ParserResult
+	parserResult := &ParserResult{
+		Order:         order,
+		OrderLocation: orderLocation,
+		OrderItem:     orderItem,
+	}
+
+	return parserResult, nil
+}
+
+// GetValueAfterLabel extracts the value after a specific label in a <td> element
+func GetValueAfterLabel(doc *goquery.Document, label string) string {
+	value := ""
+	doc.Find("td").Each(func(i int, s *goquery.Selection) {
+		if strings.Contains(s.Text(), label) {
+			html, _ := s.Html()
+			// Remove the label and any HTML tags
+			text := strings.ReplaceAll(html, fmt.Sprintf("<label><b>%s</b></label>&nbsp;", label), "")
+			text = strings.ReplaceAll(text, fmt.Sprintf("<b>%s</b>", label), "")
+			value = strings.TrimSpace(stripHTMLTags(text))
+		}
+	})
+	return value
+}
+
+// stripHTMLTags removes HTML tags from a string
+func stripHTMLTags(s string) string {
+	re := regexp.MustCompile("<.*?>")
+	return re.ReplaceAllString(s, "")
+}
+
+// ExtractOrderNumberFromLandstarHTML extracts the order number
+func ExtractOrderNumberFromLandstarHTML(doc *goquery.Document) string {
+	return GetValueAfterLabel(doc, "Load #")
+}
+
+// ExtractTrailerTypeFromLandstarHTML extracts the trailer type
+func ExtractTrailerTypeFromLandstarHTML(doc *goquery.Document) string {
+	return GetValueAfterLabel(doc, "Trailer Type")
+}
+
+// ExtractMilesFromLandstarHTML extracts the miles
+func ExtractMilesFromLandstarHTML(doc *goquery.Document) int {
+	milesStr := GetValueAfterLabel(doc, "Miles")
+	milesStr = strings.ReplaceAll(milesStr, ",", "")
+	milesStr = strings.TrimSpace(milesStr)
+	miles, err := strconv.Atoi(milesStr)
+	if err != nil {
+		return 0
+	}
+	return miles
+}
+
+// ExtractOriginFromLandstarHTML extracts the origin location
+func ExtractOriginFromLandstarHTML(doc *goquery.Document) string {
+	return GetValueAfterLabel(doc, "Origin")
+}
+
+// ExtractDestinationFromLandstarHTML extracts the destination location
+func ExtractDestinationFromLandstarHTML(doc *goquery.Document) string {
+	return GetValueAfterLabel(doc, "Destination")
+}
+
+// ExtractPickupDateFromLandstarHTML extracts the pickup date
+func ExtractPickupDateFromLandstarHTML(doc *goquery.Document) (time.Time, error) {
+	pickupText := GetValueAfterLabel(doc, "Pickup")
+	return parseDateRange(pickupText)
+}
+
+// ExtractDeliveryDateFromLandstarHTML extracts the delivery date
+func ExtractDeliveryDateFromLandstarHTML(doc *goquery.Document) (time.Time, error) {
+	deliveryText := GetValueAfterLabel(doc, "Delivery")
+	return parseDateRange(deliveryText)
+}
+
+// ExtractNotesFromLandstarHTML extracts the notes from the comments section
+func ExtractNotesFromLandstarHTML(doc *goquery.Document) string {
+	notes := ""
+	doc.Find("table#comments").Next().Find("td").Each(func(i int, s *goquery.Selection) {
+		notes += s.Text()
+	})
+	notes = strings.TrimSpace(notes)
+	if notes == "" {
+		// Try to find "Comments" in td
+		doc.Find("td").Each(func(i int, s *goquery.Selection) {
+			if strings.Contains(s.Text(), "Comments") {
+				nextTr := s.Parent().Next()
+				notes = nextTr.Find("td").Text()
+				notes = strings.TrimSpace(notes)
+			}
+		})
+	}
+	return notes
+}
+
+// ExtractCommodityFromLandstarHTML extracts commodity details
+func ExtractCommodityFromLandstarHTML(doc *goquery.Document) (length, width, height, weight float64, hazardous bool) {
+	doc.Find("#commodityDiv table tr").Each(func(i int, s *goquery.Selection) {
+		if i == 1 { // Skip the header row
+			lengthText := s.Find("td").Eq(2).Text()
+			widthText := s.Find("td").Eq(3).Text()
+			heightText := s.Find("td").Eq(4).Text()
+			weightText := s.Find("td").Eq(5).Text()
+			hazmatText := s.Find("td").Eq(6).Text()
+
+			length = parseFeetInches(lengthText)
+			width = parseFeetInches(widthText)
+			height = parseFeetInches(heightText)
+			weight = parseWeight(weightText)
+			hazardous = strings.TrimSpace(hazmatText) == "Y"
+		}
+	})
+	return
+}
+
+// parseDateRange parses the date and time from a range string
+func parseDateRange(dateRange string) (time.Time, error) {
+	// Format: 10/11/2024 08:00 - 10/11/2024 15:00
+	dateRange = strings.TrimSpace(dateRange)
+	parts := strings.Split(dateRange, "-")
+	if len(parts) == 0 {
+		return time.Time{}, fmt.Errorf("invalid date range")
+	}
+	dateStr := strings.TrimSpace(parts[0])
+	layout := "01/02/2006 15:04"
+	t, err := time.Parse(layout, dateStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t, nil
+}
+
+// parseFeetInches parses a string like "53' 0"" into feet as float64
+func parseFeetInches(text string) float64 {
+	// Remove spaces and special characters
+	text = strings.ReplaceAll(text, "&nbsp;", " ")
+	text = strings.ReplaceAll(text, "\n", "")
+	text = strings.TrimSpace(text)
+
+	re := regexp.MustCompile(`(\d+)'`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 1 {
+		feet, _ := strconv.Atoi(matches[1])
+		return float64(feet)
+	}
+	return 0.0
+}
+
+// parseWeight parses a weight string like "48,000 lbs" into float64
+func parseWeight(weightText string) float64 {
+	// Weight text is like: 48,000 lbs
+	weightText = strings.TrimSpace(weightText)
+	weightText = strings.ReplaceAll(weightText, ",", "")
+	re := regexp.MustCompile(`(\d+)\s*lbs`)
+	matches := re.FindStringSubmatch(weightText)
+	if len(matches) > 1 {
+		weight, _ := strconv.ParseFloat(matches[1], 64)
+		return weight
+	}
+	return 0.0
+}
+
+// parseCityState splits a location string into city and state
+func parseCityState(location string) (string, string) {
+	location = strings.TrimSpace(location)
+	parts := strings.Split(location, ",")
+	if len(parts) >= 2 {
+		city := strings.TrimSpace(parts[0])
+		state := strings.TrimSpace(parts[1])
+		return city, state
+	}
+	return "", ""
+}
+
+//FullCircle parser below
 
 // ExtractOrderNumberFromHTML extracts the order number from the HTML body.
 func ExtractOrderNumberFromHTML(doc *goquery.Document) string {

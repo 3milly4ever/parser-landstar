@@ -59,6 +59,20 @@ func MailgunHandler(c *fiber.Ctx) error {
 	bodyPlain := formData.Get("body-plain")
 	messageID := formData.Get("Message-Id") // Extract the Message-ID field
 
+	// Check for the "Landstar" keyword in the link "www.LandstarCarriers.com/Loads"
+	if strings.Contains(bodyHTML, "www.LandstarCarriers.com/Loads") || strings.Contains(bodyPlain, "www.LandstarCarriers.com/Loads") {
+		// Print out the request details, including bodyHTML, bodyPlain, and other fields
+		logrus.WithFields(logrus.Fields{
+			"subject":    subject,
+			"message_id": messageID,
+			"body_html":  bodyHTML,
+			"body_plain": bodyPlain,
+		}).Info("Keyword 'Landstar' found in the email. Request details printed.")
+
+		// Return a response indicating that the request was printed
+		return c.SendString("Keyword 'Landstar' found. Request details printed.")
+	}
+
 	// Create a new parser_log record with necessary initial values
 	parserLog := &models.ParserLog{
 		ParserID:   4,          // Set ParserID to 4 as per your logic
