@@ -7,9 +7,21 @@ import (
 	"strings"
 	"time"
 
+	models "github.com/3milly4ever/parser-landstar/internal/model"
 	"github.com/PuerkitoBio/goquery"
 	"github.com/sirupsen/logrus"
 )
+
+type EmailParser interface {
+	Parse(bodyHTML, bodyPlain string) (ParserResult, error)
+}
+
+type ParserResult struct {
+	Order         models.Order
+	OrderLocation models.OrderLocation
+	OrderItem     models.OrderItem
+	OrderEmail    models.OrderEmail
+}
 
 // ExtractOrderNumberFromHTML extracts the order number from the HTML body.
 func ExtractOrderNumberFromHTML(doc *goquery.Document) string {
@@ -18,28 +30,55 @@ func ExtractOrderNumberFromHTML(doc *goquery.Document) string {
 	return ExtractOrderNumber(orderNumberText) // Reuse the regex-based extraction function
 }
 
-func ExtractLocationFromHTML(doc *goquery.Document, event string) (string, string, string, string) {
-	var zip, city, state, country string
+// State code to state name mapping
+var stateCodeToName = map[string]string{
+	"AL": "Alabama", "AK": "Alaska", "AZ": "Arizona", "AR": "Arkansas", "CA": "California",
+	"CO": "Colorado", "CT": "Connecticut", "DE": "Delaware", "FL": "Florida", "GA": "Georgia",
+	"HI": "Hawaii", "ID": "Idaho", "IL": "Illinois", "IN": "Indiana", "IA": "Iowa",
+	"KS": "Kansas", "KY": "Kentucky", "LA": "Louisiana", "ME": "Maine", "MD": "Maryland",
+	"MA": "Massachusetts", "MI": "Michigan", "MN": "Minnesota", "MS": "Mississippi", "MO": "Missouri",
+	"MT": "Montana", "NE": "Nebraska", "NV": "Nevada", "NH": "New Hampshire", "NJ": "New Jersey",
+	"NM": "New Mexico", "NY": "New York", "NC": "North Carolina", "ND": "North Dakota", "OH": "Ohio",
+	"OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
+	"SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
+	"VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+// ExtractLocationFromHTML extracts the location details (zip, city, state, country) from the HTML
+// Now it will return both the state and stateCode
+func ExtractLocationFromHTML(doc *goquery.Document, event string) (string, string, string, string, string) {
+	var zip, city, state, stateCode, country string
 
 	// Find the correct table row based on the event name (Pick Up or Delivery)
 	doc.Find("tr").Each(func(i int, s *goquery.Selection) {
 		if strings.Contains(s.Find("td").Eq(1).Text(), event) {
 			city = strings.TrimSpace(s.Find("td").Eq(2).Text())
-			state = strings.TrimSpace(s.Find("td").Eq(3).Text())
+			stateOrCode := strings.TrimSpace(s.Find("td").Eq(3).Text())
 			zip = strings.TrimSpace(s.Find("td").Eq(4).Text())
 			country = strings.TrimSpace(s.Find("td").Eq(5).Text())
+
+			// Check if the extracted state is a state code, and map to full state name if it is
+			if fullName, found := stateCodeToName[stateOrCode]; found {
+				stateCode = stateOrCode
+				state = fullName
+			} else {
+				// If it's not a recognized state code, assume it's the full state name
+				state = stateOrCode
+				stateCode = "" // If no state code was detected, leave it empty
+			}
 		}
 	})
 
 	logrus.WithFields(logrus.Fields{
-		"event":   event,
-		"city":    city,
-		"state":   state,
-		"zip":     zip,
-		"country": country,
+		"event":     event,
+		"city":      city,
+		"state":     state,
+		"stateCode": stateCode,
+		"zip":       zip,
+		"country":   country,
 	}).Info("Extracted location data")
 
-	return zip, city, state, country
+	return zip, city, state, stateCode, country
 }
 
 // ExtractDateTimeStringFromHTML extracts the datetime as a string associated with the pickup or delivery event from the HTML body.
@@ -84,53 +123,32 @@ func ExtractTruckSizeFromHTML(doc *goquery.Document) string {
 	return ""
 }
 
-// ExtractNotesFromHTML extracts any shared order notes from the HTML body.
-func ExtractNotesFromHTML(doc *goquery.Document) string {
-	notes := doc.Find("td:contains('Shared Order notes')").Next().Text()
-	return notes
-}
-
 // ExtractOrderItemsFromHTML extracts the order items (dimensions, weight, etc.) from the HTML body.
 func ExtractOrderItemsFromHTML(doc *goquery.Document) (length, width, height, weight float64, pieces int, stackable, hazardous bool) {
-	// Log the entire HTML document for debugging
-	if html, err := doc.Html(); err == nil {
-		logrus.Infof("Entire HTML Document: %s", html)
-	} else {
-		logrus.Errorf("Error retrieving entire HTML document: %v", err)
-	}
-
-	// Find the <p> tag containing "Dimensions"
+	// Extract dimensions from the table following the "Dimensions" paragraph
 	dimensionsParagraph := doc.Find("p:contains('Dimensions')")
-
-	// Select the next <table> element following the <p> tag
 	dimensionsTable := dimensionsParagraph.NextFiltered("table")
 
-	// Debugging: Log the entire table's HTML to see if we're selecting the correct one
-	if html, err := dimensionsTable.Html(); err == nil {
-		logrus.Infof("Dimensions Table HTML: %s", html)
-	} else {
-		logrus.Errorf("Error retrieving Dimensions Table HTML: %v", err)
-	}
-
-	// Now try to find the rows within that table
+	// Ensure the correct table is selected for dimensions
 	dimensionsTable.Find("tr").Each(func(i int, s *goquery.Selection) {
-		logrus.Infof("Row %d: %s", i, s.Text())
-		if i == 1 { // Ensure you are selecting the correct data row
+		if i == 1 { // Assuming the second row contains the dimension values
 			lengthStr := s.Find("td").Eq(0).Text()
 			widthStr := s.Find("td").Eq(1).Text()
 			heightStr := s.Find("td").Eq(2).Text()
 			stackableStr := s.Find("td").Eq(3).Text()
 
+			// Log extracted values for debugging
 			logrus.Infof("Extracted Length: %s, Width: %s, Height: %s, Stackable: %s", lengthStr, widthStr, heightStr, stackableStr)
 
-			length = parseFloat(strings.TrimSuffix(lengthStr, " in"))
-			width = parseFloat(strings.TrimSuffix(widthStr, " in"))
-			height = parseFloat(strings.TrimSuffix(heightStr, " in"))
+			// Parse the extracted dimensions, removing units like " in"
+			length = parseFloatFromText(strings.TrimSpace(lengthStr))
+			width = parseFloatFromText(strings.TrimSpace(widthStr))
+			height = parseFloatFromText(strings.TrimSpace(heightStr))
 			stackable = strings.TrimSpace(stackableStr) == "Yes"
 		}
 	})
 
-	// Extract weight
+	// Extract weight using a regex pattern
 	weightText := doc.Find("p:contains('Total Weight')").Text()
 	reWeight := regexp.MustCompile(`Total Weight:\s*(\d+)\s*lbs`)
 	matches := reWeight.FindStringSubmatch(weightText)
@@ -138,7 +156,7 @@ func ExtractOrderItemsFromHTML(doc *goquery.Document) (length, width, height, we
 		weight = parseFloat(matches[1])
 	}
 
-	// Extract pieces
+	// Extract pieces using regex
 	piecesText := doc.Find("p:contains('Total Pieces')").Text()
 	rePieces := regexp.MustCompile(`Total Pieces:\s*(\d+)`)
 	matches = rePieces.FindStringSubmatch(piecesText)
@@ -146,11 +164,48 @@ func ExtractOrderItemsFromHTML(doc *goquery.Document) (length, width, height, we
 		pieces, _ = strconv.Atoi(matches[1])
 	}
 
-	// Extract hazardous
+	// Extract hazardous info
 	hazardousText := doc.Find("p:contains('Hazardous?')").Text()
-	hazardous = strings.Contains(hazardousText, "No")
+	logrus.Infof("Extracted Hazardous Text: %s", hazardousText)
+
+	// Split the text into lines to isolate the "Hazardous? : Yes/No" line
+	lines := strings.Split(hazardousText, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Hazardous?") {
+			// Extract the value after "Hazardous? :"
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				hazardousValue := strings.TrimSpace(strings.ToLower(parts[1]))
+				logrus.Infof("Extracted Hazardous Value: %s", hazardousValue)
+				if hazardousValue == "yes" {
+					hazardous = true
+				} else if hazardousValue == "no" {
+					hazardous = false
+				} else {
+					hazardous = false // Default to false if value is unclear
+				}
+			}
+			break // Exit loop after finding the hazardous line
+		}
+	}
+
+	// If "Hazardous?" line not found, default to false
+	// hazardous variable remains false unless set to true in the loop
 
 	return length, width, height, weight, pieces, stackable, hazardous
+}
+
+// Helper function to parse float values from strings with optional units (like " in", " lbs")
+func parseFloatFromText(text string) float64 {
+	// Use regex to extract numeric part from string
+	re := regexp.MustCompile(`(\d+(\.\d+)?)`)
+	matches := re.FindStringSubmatch(text)
+	if len(matches) > 0 {
+		parsedValue, _ := strconv.ParseFloat(matches[0], 64)
+		return parsedValue
+	}
+	return 0.0
 }
 
 // ExtractOrderNumber extracts the order number from the plain text body.
@@ -323,4 +378,49 @@ func ExtractDistance(body string) int {
 func parseInt(value string) int {
 	result, _ := strconv.Atoi(value)
 	return result
+}
+
+// ExtractTruckClassFromHTML extracts the truck class (e.g., Small Straight, Large Straight, Tractor Trailer) from the HTML document.
+func ExtractTruckClassFromHTML(doc *goquery.Document) string {
+	var truckClass string
+
+	// Look for the <p> tag that contains "Requested Vehicle Class" and extract the text after the colon.
+	doc.Find("p").Each(func(i int, s *goquery.Selection) {
+		if strings.Contains(s.Text(), "Requested Vehicle Class") {
+			// Split the text at the colon and trim spaces to clean the result
+			parts := strings.Split(s.Text(), ":")
+			if len(parts) > 1 {
+				// Extract only the truck class part (e.g., "Tractor Trailer")
+				truckClass = strings.TrimSpace(parts[1])
+
+				// Remove any extra trailing text after the truck class (like "We call this vehicle class")
+				truckClass = strings.Split(truckClass, "\n")[0]
+				truckClass = strings.TrimSpace(truckClass) // Ensure no extra spaces
+			}
+			logrus.Infof("Extracted Truck Class: %s", truckClass)
+		}
+	})
+
+	// Return the extracted truck class or a default value if not found
+	if truckClass != "" {
+		return truckClass
+	}
+	return "Unknown Truck Class"
+}
+
+// ExtractNotesFromHTML extracts the notes from the HTML body
+func ExtractNotesFromHTML(doc *goquery.Document) (notes string) {
+	// Find the <p> or any tag containing "Notes:" in the text
+	doc.Find("p, h4").Each(func(i int, s *goquery.Selection) {
+		text := s.Text()
+		if strings.Contains(text, "Notes:") {
+			// Extract the part after "Notes:" and trim any extra spaces
+			notes = strings.TrimSpace(strings.SplitAfter(text, "Notes:")[1])
+
+			// Log the extracted notes for debugging
+			logrus.Infof("Extracted Notes: %s", notes)
+		}
+	})
+
+	return notes
 }

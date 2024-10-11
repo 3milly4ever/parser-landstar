@@ -34,6 +34,11 @@ var (
 		Help:    "Duration of message processing in seconds",
 		Buckets: prometheus.DefBuckets,
 	})
+
+	MessagesDeleted = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "sqs_worker_messages_deleted_total",
+		Help: "Total number of messages deleted from SQS",
+	})
 )
 
 // InitializePrometheus initializes the Prometheus metrics and starts the HTTP handler
@@ -44,6 +49,7 @@ func InitializePrometheus() {
 	prometheus.MustRegister(MessagesFailed)
 	prometheus.MustRegister(ProcessingDuration)
 	prometheus.MustRegister(MessagesParsed)
+	prometheus.MustRegister(MessagesDeleted)
 
 	// Start a HTTP server for Prometheus to scrape metrics
 	http.Handle("/metrics", promhttp.Handler())

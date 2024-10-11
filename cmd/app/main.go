@@ -6,6 +6,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/3milly4ever/parser-landstar/internal/handler"
 	"github.com/3milly4ever/parser-landstar/internal/metrics"
 	"github.com/3milly4ever/parser-landstar/internal/server"
 	"github.com/3milly4ever/parser-landstar/internal/worker"
@@ -15,6 +16,15 @@ import (
 func main() {
 	// Load configuration
 	config.LoadConfig()
+
+	// Initialize the database
+	db, err := handler.InitializeDB()
+	if err != nil {
+		log.Fatalf("Failed to initialize the database: %v", err)
+	}
+
+	// Set the DB for the handler package
+	handler.SetDB(db)
 
 	// Set up and run the Fiber server in a separate goroutine
 	go server.SetupAndRun()
