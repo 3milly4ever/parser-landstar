@@ -18,6 +18,25 @@ type Order struct {
 	OrderTypeID        int       `json:"order_type_id"`
 	EstimatedMiles     int       `json:"estimated_miles"`
 	TruckTypeID        int       `json:"truck_type_id"`
+	OriginalTruckSize  string    `json:"original_truck_size"`
+}
+
+type ParserLog struct {
+	ID         int       `gorm:"primaryKey;autoIncrement" json:"id"`
+	BodyHtml   string    `gorm:"column:body_html;type:text"`
+	BodyPlain  string    `gorm:"column:body_plain;type:text"`
+	ErrorType  string    `gorm:"column:error_type;type:varchar(255)"`
+	ErrorText  string    `gorm:"column:error_text;type:text"`
+	OrderID    int       `gorm:"column:order_id"`
+	ParserID   uint64    `gorm:"column:parser_id"`
+	ParserType string    `gorm:"column:parser_type;type:enum('mail','api')"`
+	Subject    string    `gorm:"column:subject;type:text"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at"`
+}
+
+func (ParserLog) TableName() string {
+	return "parser_log"
 }
 
 type OrderLocation struct {

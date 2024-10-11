@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	models "github.com/3milly4ever/parser-landstar/internal/model"
 	"github.com/3milly4ever/parser-landstar/internal/parser"
 	config "github.com/3milly4ever/parser-landstar/pkg"
 	"github.com/PuerkitoBio/goquery"
@@ -14,7 +15,27 @@ import (
 	"github.com/aws/aws-sdk-go/service/sqs"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
+
+// Ensure you have access to the 'db' instance
+var db *gorm.DB
+
+func SetDB(database *gorm.DB) {
+	db = database
+}
+
+// InitializeDB initializes the DB connection for use in the handler
+func InitializeDB() (*gorm.DB, error) {
+	dsn := config.AppConfig.MySQLDSN
+	database, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	if err != nil {
+		logrus.Error("Failed to connect to the database: ", err)
+		return nil, err
+	}
+	return database, nil
+}
 
 func MailgunHandler(c *fiber.Ctx) error {
 	logrus.Info("Mailgun route accessed")
@@ -37,6 +58,28 @@ func MailgunHandler(c *fiber.Ctx) error {
 	bodyHTML := formData.Get("body-html")
 	bodyPlain := formData.Get("body-plain")
 	messageID := formData.Get("Message-Id") // Extract the Message-ID field
+
+	// Create a new parser_log record with necessary initial values
+	parserLog := &models.ParserLog{
+		ParserID:   4,          // Set ParserID to 4 as per your logic
+		ParserType: "mail",     // Set the parser type
+		BodyHtml:   bodyHTML,   // Set the extracted HTML body
+		BodyPlain:  bodyPlain,  // Set the extracted plain text body
+		CreatedAt:  time.Now(), // Set the current time for creation
+		UpdatedAt:  time.Now(), // Set the updated time
+	}
+
+	// Save to database
+	if err := db.Create(parserLog).Error; err != nil {
+		logrus.Error("Failed to create parser log record: ", err)
+		// Update parser_log with error_type and error_text
+		parserLog.ErrorType = "ParseError"
+		parserLog.ErrorText = err.Error()
+		parserLog.UpdatedAt = time.Now()
+		db.Save(parserLog)
+
+		return c.Status(fiber.StatusInternalServerError).SendString("Failed to create parser log record")
+	}
 
 	// Log the received data for debugging
 	logrus.WithFields(logrus.Fields{
@@ -63,17 +106,18 @@ func MailgunHandler(c *fiber.Ctx) error {
 
 	// Check if HTML body exists and parse it if available
 	var (
-		orderNumber                                               string
-		pickupZip, pickupCity, pickupState, pickupCountry         string
-		deliveryZip, deliveryCity, deliveryState, deliveryCountry string
-		pickupCountryCode, deliveryCountryCode                    string
-		pickupDateTime, deliveryDateTime                          time.Time
-		truckSize, notes                                          string
-		length, width, height, weight                             float64
-		pieces                                                    int
-		stackable, hazardous                                      bool
-		estimatedMiles                                            int
-		truckTypeID                                               int
+		orderNumber                                                                  string
+		pickupZip, pickupCity, pickupState, pickupCountry, pickupStateCode           string
+		deliveryZip, deliveryCity, deliveryState, deliveryCountry, deliveryStateCode string
+		pickupCountryCode, deliveryCountryCode                                       string
+		pickupDateTime, deliveryDateTime                                             time.Time
+		truckSize, notes                                                             string
+		originalTruckSize                                                            string
+		length, width, height, weight                                                float64
+		pieces                                                                       int
+		stackable, hazardous                                                         bool
+		estimatedMiles                                                               int
+		truckTypeID                                                                  int
 	)
 
 	layout := "2006-01-02 15:04:05" // Layout for MySQL datetime format
@@ -87,13 +131,16 @@ func MailgunHandler(c *fiber.Ctx) error {
 			logrus.Error("Error parsing HTML: ", err)
 		} else {
 			orderNumber = parser.ExtractOrderNumberFromHTML(doc)
-			pickupZip, pickupCity, pickupState, pickupCountry = parser.ExtractLocationFromHTML(doc, "Pick Up")
-			deliveryZip, deliveryCity, deliveryState, deliveryCountry = parser.ExtractLocationFromHTML(doc, "Delivery")
+			pickupZip, pickupCity, pickupState, pickupStateCode, pickupCountry = parser.ExtractLocationFromHTML(doc, "Pick Up")
+			deliveryZip, deliveryCity, deliveryState, deliveryStateCode, deliveryCountry = parser.ExtractLocationFromHTML(doc, "Delivery")
 			pickupDateTime, _ = time.Parse(layout, parser.FormatDateTimeString(parser.ExtractDateTimeStringFromHTML(doc, "Pick Up")))
 			deliveryDateTime, _ = time.Parse(layout, parser.FormatDateTimeString(parser.ExtractDateTimeStringFromHTML(doc, "Delivery")))
 			truckSize = parser.ExtractTruckSizeFromHTML(doc)
 			notes = parser.ExtractNotesFromHTML(doc)
 			estimatedMiles = parser.ExtractDistanceFromHTML(doc)
+			originalTruckSize = parser.ExtractTruckClassFromHTML(doc)
+			// **Use the ExtractOrderItemsFromHTML function to extract order items**
+			length, width, height, weight, pieces, stackable, hazardous = parser.ExtractOrderItemsFromHTML(doc)
 
 			// Extract additional fields
 			pickupCountryCode = "US"
@@ -126,9 +173,10 @@ func MailgunHandler(c *fiber.Ctx) error {
 
 	// Define truck size mappings (case-insensitive)
 	truckSizeMap := map[string]int{
-		"small straight": 1,
-		"large straight": 2,
-		"sprinter":       3,
+		"small straight":  1,
+		"large straight":  2,
+		"sprinter":        3,
+		"tractor trailer": 4,
 	}
 
 	// Convert truck size to lowercase and match it with the corresponding TruckTypeID
@@ -136,7 +184,7 @@ func MailgunHandler(c *fiber.Ctx) error {
 	if id, exists := truckSizeMap[lowerTruckSize]; exists {
 		truckTypeID = id
 	} else {
-		truckTypeID = 3 // Default if no match found
+		truckTypeID = 4 // Default if no match found
 	}
 
 	// Prepare data to be sent to SQS
@@ -148,15 +196,20 @@ func MailgunHandler(c *fiber.Ctx) error {
 		"deliveryDate":        deliveryDateTime,
 		"suggestedTruckSize":  truckSize,
 		"truckTypeID":         truckTypeID, // Include the TruckTypeID
+		"originalTruckSize":   originalTruckSize,
 		"notes":               notes,
 		"pickupZip":           pickupZip,
 		"deliveryZip":         deliveryZip,
 		"pickupCity":          pickupCity,
 		"pickupState":         pickupState,
+		"pickupStateCode":     pickupStateCode,
 		"pickupCountry":       pickupCountry,
 		"pickupCountryCode":   pickupCountryCode, // Include pickup country code
+		"pickupCountryName":   pickupCountry,
+		"deliveryCountryName": deliveryCountry,
 		"deliveryCity":        deliveryCity,
 		"deliveryState":       deliveryState,
+		"deliveryStateCode":   deliveryStateCode,
 		"deliveryCountry":     deliveryCountry,
 		"deliveryCountryCode": deliveryCountryCode, // Include delivery country code
 		"estimatedMiles":      estimatedMiles,
@@ -169,7 +222,10 @@ func MailgunHandler(c *fiber.Ctx) error {
 		"hazardous":           hazardous,
 		"replyTo":             replyTo,
 		"subject":             subject,
+		"bodyHTML":            bodyHTML,  // Include the HTML body
+		"bodyPlain":           bodyPlain, // Include the plain text body
 		"messageID":           messageID,
+		"parserLogID":         parserLog.ID, // Include the parser_log ID
 		"createdAt":           time.Now(),
 		"updatedAt":           time.Now(),
 	}

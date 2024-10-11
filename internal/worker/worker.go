@@ -1,15 +1,18 @@
 package worker
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
-	"strings"
+	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/3milly4ever/parser-landstar/internal/metrics"
@@ -22,6 +25,8 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
+
+const maxWorkers = 10
 
 type SQSWorker struct {
 	sqsClient *sqs.SQS
@@ -51,62 +56,99 @@ func NewSQSWorker(queueURL string, awsRegion string) (*SQSWorker, error) {
 }
 
 func (worker *SQSWorker) Start() {
-	for {
-		// Poll SQS for messages
-		result, err := worker.sqsClient.ReceiveMessage(&sqs.ReceiveMessageInput{
-			QueueUrl:            aws.String(worker.queueURL),
-			MaxNumberOfMessages: aws.Int64(10), // Number of messages to pull
-			WaitTimeSeconds:     aws.Int64(20), // Long polling
-		})
-		if err != nil {
-			log.Printf("Error receiving message: %v", err)
-			continue
-		}
+	// Create a channel to receive messages
+	messageChan := make(chan *sqs.Message, 10)
 
-		for _, message := range result.Messages {
-			// Process each message
-			err := worker.processMessage(message)
+	// Create separate wait groups
+	var wgWorkers sync.WaitGroup
+	var wgPoller sync.WaitGroup
+
+	// Context for graceful shutdown
+	ctx, cancel := context.WithCancel(context.Background())
+
+	// Signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start worker goroutines
+	for i := 0; i < maxWorkers; i++ {
+		wgWorkers.Add(1)
+		go func() {
+			defer wgWorkers.Done()
+			for {
+				select {
+				case message, ok := <-messageChan:
+					if !ok {
+						return // Channel closed, stop the worker
+					}
+					// Process the message
+					if err := worker.processMessage(message); err != nil {
+						log.Printf("Error processing message: %v", err)
+					}
+					// Delete the message from SQS
+					_, err := worker.sqsClient.DeleteMessage(&sqs.DeleteMessageInput{
+						QueueUrl:      aws.String(worker.queueURL),
+						ReceiptHandle: message.ReceiptHandle,
+					})
+					if err != nil {
+						log.Printf("Error deleting message: %v", err)
+					}
+					metrics.MessagesDeleted.Inc()
+				case <-ctx.Done():
+					return // Stop the worker if context is canceled
+				}
+			}
+		}()
+	}
+
+	// Start the polling goroutine
+	wgPoller.Add(1)
+	go func() {
+		defer wgPoller.Done()
+		for {
+			// Check if context is done before polling
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			// Poll SQS for messages
+			result, err := worker.sqsClient.ReceiveMessage(&sqs.ReceiveMessageInput{
+				QueueUrl:            aws.String(worker.queueURL),
+				MaxNumberOfMessages: aws.Int64(10),
+				WaitTimeSeconds:     aws.Int64(20),
+			})
 			if err != nil {
-				log.Printf("Error processing message: %v", err)
+				log.Printf("Error receiving message: %v", err)
 				continue
 			}
 
-			// Delete message from the queue after processing
-			_, err = worker.sqsClient.DeleteMessage(&sqs.DeleteMessageInput{
-				QueueUrl:      aws.String(worker.queueURL),
-				ReceiptHandle: message.ReceiptHandle,
-			})
-			if err != nil {
-				log.Printf("Error deleting message: %v", err)
+			// Send messages to the channel
+			for _, message := range result.Messages {
+				select {
+				case messageChan <- message:
+				case <-ctx.Done():
+					return
+				}
 			}
 		}
-	}
-}
+	}()
 
-func FetchGeocodeData(url string) (map[string]interface{}, error) {
-	// Make the HTTP request to the geocoding API
-	resp, err := http.Get(url)
-	if err != nil {
-		logrus.Error("Failed to fetch geocoding data: ", err)
-		return nil, err
-	}
-	defer resp.Body.Close()
+	// Wait for a shutdown signal
+	<-sigChan
+	log.Println("Shutting down...")
+	cancel() // Signal cancellation
 
-	// Read and unmarshal the response body
-	body, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		logrus.Error("Failed to read geocoding response: ", err)
-		return nil, err
-	}
+	// Wait for the polling goroutine to finish
+	wgPoller.Wait()
 
-	var result map[string]interface{}
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		logrus.Error("Failed to unmarshal geocoding response: ", err)
-		return nil, err
-	}
+	// Close the message channel after polling goroutine has stopped
+	close(messageChan)
 
-	return result, nil
+	// Wait for all worker goroutines to finish
+	wgWorkers.Wait()
+	log.Println("Workers stopped")
 }
 
 func ExtractCoordinatesAndCounty(geocodingData map[string]interface{}) (float64, float64, string, error) {
@@ -243,6 +285,17 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		return err
 	}
 
+	// Extract parserLogID from the message
+	parserLogID := getIntValue(data["parserLogID"])
+
+	// Fetch the existing parser_log record
+	var parserLog models.ParserLog
+	if err := worker.db.First(&parserLog, parserLogID).Error; err != nil {
+		logrus.Error("Failed to find parser log record: ", err)
+		metrics.MessagesFailed.Inc()
+		return err
+	}
+
 	// Log the parsed data to identify potential issues
 	logrus.WithField("parsed_data", data).Info("Parsed SQS message data")
 
@@ -366,21 +419,9 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		return err
 	}
 
-	// Determine OrderTypeID based on SuggestedTruckSize
-	// Determine OrderTypeID based on SuggestedTruckSize (case-insensitive)
 	var orderTypeID int
-	truckSize := strings.ToLower(getStringValue(data["suggestedTruckSize"])) // Convert to lowercase
 
-	switch truckSize {
-	case "small straight":
-		orderTypeID = 1
-	case "large straight":
-		orderTypeID = 3
-	case "sprinter":
-		orderTypeID = 2
-	default:
-		orderTypeID = 3
-	}
+	orderTypeID = 4
 	// Create and save the Order record to the database, including TruckTypeID
 	order := models.Order{
 		OrderNumber:        getStringValue(data["orderNumber"]),
@@ -396,6 +437,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		DeliveryZip:        getStringValue(data["deliveryZip"]),
 		OrderTypeID:        orderTypeID,
 		TruckTypeID:        truckTypeID, // Ensure TruckTypeID from SQS is used
+		OriginalTruckSize:  getStringValue(data["originalTruckSize"]),
 		EstimatedMiles:     getIntValue(data["estimatedMiles"]),
 	}
 
@@ -408,24 +450,27 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	// Create and save the OrderLocation record to the database
 	orderLocation := models.OrderLocation{
+		// Construct the pickup and delivery labels
+		PickupLabel:         fmt.Sprintf("%s, %s, %s, %s", getStringValue(data["pickupZip"]), getStringValue(data["pickupCity"]), getStringValue(data["pickupState"]), getStringValue(data["pickupCountryCode"])),
+		DeliveryLabel:       fmt.Sprintf("%s, %s, %s, %s", getStringValue(data["deliveryZip"]), getStringValue(data["deliveryCity"]), getStringValue(data["deliveryState"]), getStringValue(data["deliveryCountryCode"])),
+		DeliveryStreet:      getStringValue(data["deliveryStreet"]),
+		PickupStreet:        getStringValue(data["pickupStreet"]),
 		OrderID:             order.ID,
-		PickupLabel:         getStringValue(data["pickupLabel"]),
 		PickupCountryCode:   getStringValue(data["pickupCountryCode"]),
 		PickupCountryName:   getStringValue(data["pickupCountryName"]),
 		PickupStateCode:     getStringValue(data["pickupStateCode"]),
 		PickupState:         getStringValue(data["pickupState"]),
 		PickupCity:          getStringValue(data["pickupCity"]),
-		PickupPostalCode:    getStringValue(data["pickupPostalCode"]),
+		PickupPostalCode:    getStringValue(data["pickupZip"]),
 		PickupLat:           pickupLat,    // Latitude from geocoding
 		PickupLng:           pickupLng,    // Longitude from geocoding
 		PickupCounty:        pickupCounty, // County from geocoding
-		DeliveryLabel:       getStringValue(data["deliveryLabel"]),
 		DeliveryCountryCode: getStringValue(data["deliveryCountryCode"]),
 		DeliveryCountryName: getStringValue(data["deliveryCountryName"]),
 		DeliveryStateCode:   getStringValue(data["deliveryStateCode"]),
 		DeliveryState:       getStringValue(data["deliveryState"]),
 		DeliveryCity:        getStringValue(data["deliveryCity"]),
-		DeliveryPostalCode:  getStringValue(data["deliveryPostalCode"]),
+		DeliveryPostalCode:  getStringValue(data["deliveryZip"]),
 		DeliveryLat:         deliveryLat,    // Latitude from geocoding
 		DeliveryLng:         deliveryLng,    // Longitude from geocoding
 		DeliveryCounty:      deliveryCounty, // County from geocoding
@@ -479,6 +524,52 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	}
 	logrus.WithField("order_email_id", orderEmail.ID).Info("OrderEmail saved to database")
 
+	// Once processing is complete, update the parser_log record
+	parserLog.Subject = getStringValue(data["subject"])
+	parserLog.BodyHtml = getStringValue(data["bodyHTML"])
+	parserLog.BodyPlain = getStringValue(data["bodyPlain"])
+	parserLog.OrderID = order.ID
+	parserLog.ParserID = 4
+	parserLog.UpdatedAt = time.Now()
+
+	// Save the updated parser_log record
+	if err := worker.db.Save(&parserLog).Error; err != nil {
+		logrus.Error("Failed to update parser log record: ", err)
+		metrics.MessagesFailed.Inc()
+		return err
+	}
+
+	// // Send order ID to external API
+	// orderIDPayload := map[string]int{"order_id": order.ID}
+	// payloadBytes, err := json.Marshal(orderIDPayload)
+	// if err != nil {
+	// 	logrus.Error("Failed to marshal order ID payload: ", err)
+	// 	return err
+	// }
+
+	req, err := http.NewRequest("GET", fmt.Sprintf("https://platform.hfield.net/api/send_order?order_id=%d", order.ID), nil)
+	if err != nil {
+		logrus.Error("Failed to create HTTP request: ", err)
+		return err
+	}
+
+	req.Header.Set("Content-Type", "application/json") // Optional for GET, but can be included if necessary
+	client := &http.Client{}
+	resp, err := client.Do(req)
+	if err != nil {
+		logrus.Error("Failed to send order ID to external API: ", err)
+		return err
+	} else {
+		logrus.Info("Successfully sent order ID to external API")
+	}
+
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		logrus.WithField("status_code", resp.StatusCode).Error("External API call failed")
+		return fmt.Errorf("external API call failed with status code: %d", resp.StatusCode)
+	}
+
 	// Log additional details about the order processing
 	logrus.WithFields(logrus.Fields{
 		"order_id":    order.ID,
@@ -490,6 +581,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	// Increment the messagesParsed counter after successful processing
 	metrics.MessagesParsed.Inc()
 
+	logrus.Infof("Order type ID: %v", orderTypeID)
 	return nil
 }
 
