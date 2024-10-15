@@ -419,9 +419,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		return err
 	}
 
-	var orderTypeID int
-
-	orderTypeID = 4
+	orderTypeID := 4
 	// Create and save the Order record to the database, including TruckTypeID
 	order := models.Order{
 		OrderNumber:        getStringValue(data["orderNumber"]),
@@ -440,6 +438,8 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		OriginalTruckSize:  getStringValue(data["originalTruckSize"]),
 		EstimatedMiles:     getIntValue(data["estimatedMiles"]),
 	}
+
+	logrus.Infof("Inserting order with TruckTypeID: %d", order.TruckTypeID)
 
 	if err := worker.db.Create(&order).Error; err != nil {
 		logrus.Error("Failed to save order: ", err)

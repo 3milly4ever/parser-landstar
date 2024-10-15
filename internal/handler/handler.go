@@ -59,20 +59,6 @@ func MailgunHandler(c *fiber.Ctx) error {
 	bodyPlain := formData.Get("body-plain")
 	messageID := formData.Get("Message-Id") // Extract the Message-ID field
 
-	// Check for the "Landstar" keyword in the link "www.LandstarCarriers.com/Loads"
-	if strings.Contains(bodyHTML, "www.LandstarCarriers.com/Loads") || strings.Contains(bodyPlain, "www.LandstarCarriers.com/Loads") {
-		// Print out the request details, including bodyHTML, bodyPlain, and other fields
-		logrus.WithFields(logrus.Fields{
-			"subject":    subject,
-			"message_id": messageID,
-			"body_html":  bodyHTML,
-			"body_plain": bodyPlain,
-		}).Info("Keyword 'Landstar' found in the email. Request details printed.")
-
-		// Return a response indicating that the request was printed
-		return c.SendString("Keyword 'Landstar' found. Request details printed.")
-	}
-
 	// Create a new parser_log record with necessary initial values
 	parserLog := &models.ParserLog{
 		ParserID:   4,          // Set ParserID to 4 as per your logic
@@ -93,6 +79,113 @@ func MailgunHandler(c *fiber.Ctx) error {
 		db.Save(parserLog)
 
 		return c.Status(fiber.StatusInternalServerError).SendString("Failed to create parser log record")
+	}
+
+	// Check for the "Landstar" keyword in the link "www.LandstarCarriers.com/Loads"
+	if strings.Contains(bodyHTML, "www.LandstarCarriers.com/Loads") || strings.Contains(bodyPlain, "www.LandstarCarriers.com/Loads") {
+		// Print out the request details, including bodyHTML, bodyPlain, and other fields
+		logrus.WithFields(logrus.Fields{
+			"subject":    subject,
+			"message_id": messageID,
+			"body_html":  bodyHTML,
+			"body_plain": bodyPlain,
+		}).Info("Keyword 'Landstar' found in the email. Request details printed.")
+
+		// Initialize the Landstar parser
+		landstarParser := &parser.LandstarParser{}
+
+		// Parse the email content
+		parserResult, err := landstarParser.Parse(bodyHTML, bodyPlain)
+		if err != nil {
+			logrus.Error("Failed to parse Landstar email: ", err)
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to parse email")
+		}
+
+		// **Handle nil parserResult when the truck size is ignored**
+		if parserResult == nil {
+			logrus.Warn("ParserResult is nil due to ignored truck size. Skipping processing.")
+			return c.SendString("Email ignored due to truck size")
+		}
+
+		// Extract reply-to from plain text body
+		var replyTo string
+		if bodyPlain != "" {
+			replyTo = parser.ExtractReplyTo(bodyPlain)
+		}
+
+		// Prepare data to be sent to SQS
+		data := map[string]interface{}{
+			"orderNumber":         parserResult.Order.OrderNumber,
+			"pickupLocation":      parserResult.OrderLocation.PickupCity + ", " + parserResult.OrderLocation.PickupState + ", " + parserResult.OrderLocation.PickupCountryName,
+			"deliveryLocation":    parserResult.OrderLocation.DeliveryCity + ", " + parserResult.OrderLocation.DeliveryState + ", " + parserResult.OrderLocation.DeliveryCountryName,
+			"pickupDate":          parserResult.Order.PickupDate,
+			"truckTypeID":         parserResult.Order.TruckTypeID,
+			"deliveryDate":        parserResult.Order.DeliveryDate,
+			"suggestedTruckSize":  parserResult.Order.SuggestedTruckSize,
+			"originalTruckSize":   parserResult.Order.OriginalTruckSize,
+			"notes":               parserResult.Order.Notes,
+			"pickupZip":           parserResult.PickupZip,
+			"deliveryZip":         parserResult.DeliveryZip,
+			"pickupCity":          parserResult.OrderLocation.PickupCity,
+			"pickupState":         parserResult.OrderLocation.PickupState,
+			"pickupStateCode":     parserResult.OrderLocation.PickupStateCode,
+			"pickupCountry":       parserResult.OrderLocation.PickupCountryCode,
+			"pickupCountryCode":   parserResult.OrderLocation.PickupCountryCode,
+			"pickupCountryName":   parserResult.OrderLocation.PickupCountryName,
+			"deliveryCountryName": parserResult.OrderLocation.DeliveryCountryName,
+			"deliveryCity":        parserResult.OrderLocation.DeliveryCity,
+			"deliveryState":       parserResult.OrderLocation.DeliveryState,
+			"deliveryStateCode":   parserResult.OrderLocation.DeliveryStateCode,
+			"deliveryCountry":     parserResult.OrderLocation.DeliveryCountryCode,
+			"deliveryCountryCode": parserResult.OrderLocation.DeliveryCountryCode,
+			"estimatedMiles":      parserResult.Order.EstimatedMiles,
+			"length":              parserResult.OrderItem.Length,
+			"width":               parserResult.OrderItem.Width,
+			"height":              parserResult.OrderItem.Height,
+			"weight":              parserResult.OrderItem.Weight,
+			"pieces":              parserResult.OrderItem.Pieces,
+			"stackable":           parserResult.OrderItem.Stackable,
+			"hazardous":           parserResult.OrderItem.Hazardous,
+			"replyTo":             replyTo,
+			"subject":             subject,
+			"bodyHTML":            bodyHTML,
+			"parserLogID":         parserLog.ID, // Include the parser_log ID
+			"bodyPlain":           bodyPlain,
+			"messageID":           messageID,
+			"createdAt":           time.Now(),
+			"updatedAt":           time.Now(),
+		}
+
+		// Print each field individually, excluding bodyHTML and bodyPlain
+		logrus.Info("Parsed data from Landstar email:")
+		for key, value := range data {
+			if key == "bodyHTML" || key == "bodyPlain" {
+				continue // Skip printing bodyHTML and bodyPlain
+			}
+			logrus.Infof("%s: %v", key, value)
+		}
+
+		// Alternatively, you can marshal the data to JSON and print it
+		messageBody, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			logrus.Error("Error marshaling data to JSON: ", err)
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to prepare message")
+		}
+
+		//	logrus.Info("Parsed Data:\n", string(messageBody))
+		// Send the message to SQS
+		sqsClient := sqs.New(session.Must(session.NewSession()))
+		_, err = sqsClient.SendMessage(&sqs.SendMessageInput{
+			QueueUrl:    aws.String(config.AppConfig.SQSQueueURL),
+			MessageBody: aws.String(string(messageBody)),
+		})
+		if err != nil {
+			logrus.Error("Failed to send message to SQS: ", err)
+			return c.Status(fiber.StatusInternalServerError).SendString("Failed to send message")
+		}
+		logrus.Info("Landstar email data parsed and sent to SQS successfully")
+		// Return a response indicating that the data has been printed
+		return c.SendString("Landstar email data parsed, printed and sent to SQS successfully")
 	}
 
 	// Log the received data for debugging
