@@ -1,8 +1,14 @@
 package parser
 
 import (
+	"encoding/json"
 	"fmt"
+	"html"
+	"io"
 	"log"
+	"math"
+	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,6 +27,8 @@ type ParserResult struct {
 	OrderLocation models.OrderLocation
 	OrderItem     models.OrderItem
 	OrderEmail    models.OrderEmail
+	PickupZip     string
+	DeliveryZip   string
 }
 
 // Parse parses the email content and returns a ParserResult
@@ -37,7 +45,6 @@ func (p *LandstarParser) Parse(bodyHTML, bodyPlain string) (*ParserResult, error
 	return parserResult, nil
 }
 
-// ExtractDataFromLandstarHTML extracts data from the Landstar HTML email content
 func ExtractDataFromLandstarHTML(bodyHTML string) (*ParserResult, error) {
 	doc, err := goquery.NewDocumentFromReader(strings.NewReader(bodyHTML))
 	if err != nil {
@@ -67,16 +74,42 @@ func ExtractDataFromLandstarHTML(bodyHTML string) (*ParserResult, error) {
 	order.OriginalTruckSize = order.SuggestedTruckSize
 	logrus.Infof("Extracted Suggested Truck Size: %s", order.SuggestedTruckSize)
 
+	// **Check if originalTruckSize contains "FLAT" or "REF" and ignore it if true**
+	if strings.Contains(strings.ToUpper(order.OriginalTruckSize), "FLAT") || strings.Contains(strings.ToUpper(order.OriginalTruckSize), "REF") {
+		logrus.Warnf("Ignoring Original Truck Size as it contains 'FLAT' or 'REF'. OriginalTruckSize: %s", order.OriginalTruckSize)
+		order.OriginalTruckSize = "" // Set it to empty string or handle it as per your logic
+		return nil, nil              // Return nil without parsing or saving
+	}
+
 	// Extract EstimatedMiles
 	order.EstimatedMiles = ExtractMilesFromLandstarHTML(doc)
 	orderLocation.EstimatedMiles = float64(order.EstimatedMiles)
 	logrus.Infof("Extracted Estimated Miles: %d", order.EstimatedMiles)
 
-	// Extract Origin and PickupDate
-	order.PickupLocation = ExtractOriginFromLandstarHTML(doc)
-	orderLocation.PickupLabel = order.PickupLocation
-	logrus.Infof("Extracted Pickup Location: %s", order.PickupLocation)
+	// Extract Origin and Destination from Stops
+	origin, destination := ExtractStopsFromLandstarHTML(doc)
+	// No need to assign or log origin and destination here since we construct the locations later
 
+	// Extract City, State, StateCode, and Zip from Origin and Destination
+	originCity, originState, originStateCode, originZip := parseCityStateZip(origin)
+	orderLocation.PickupCity = originCity
+	orderLocation.PickupState = originState
+	orderLocation.PickupStateCode = originStateCode
+	pickupZip := originZip // Separate variable since orderLocation doesn't have PickupZip
+
+	destCity, destState, destStateCode, destZip := parseCityStateZip(destination)
+	orderLocation.DeliveryCity = destCity
+	orderLocation.DeliveryState = destState
+	orderLocation.DeliveryStateCode = destStateCode
+	deliveryZip := destZip // Separate variable since orderLocation doesn't have DeliveryZip
+
+	// Set default country codes and names
+	orderLocation.PickupCountryCode = "US"
+	orderLocation.DeliveryCountryCode = "US"
+	orderLocation.PickupCountryName = "United States"
+	orderLocation.DeliveryCountryName = "United States"
+
+	// Extract PickupDate
 	pickupDate, err := ExtractPickupDateFromLandstarHTML(doc)
 	if err == nil {
 		order.PickupDate = pickupDate
@@ -85,11 +118,7 @@ func ExtractDataFromLandstarHTML(bodyHTML string) (*ParserResult, error) {
 		logrus.Warnf("Failed to parse Pickup Date: %v", err)
 	}
 
-	// Extract Destination and DeliveryDate
-	order.DeliveryLocation = ExtractDestinationFromLandstarHTML(doc)
-	orderLocation.DeliveryLabel = order.DeliveryLocation
-	logrus.Infof("Extracted Delivery Location: %s", order.DeliveryLocation)
-
+	// Extract DeliveryDate
 	deliveryDate, err := ExtractDeliveryDateFromLandstarHTML(doc)
 	if err == nil {
 		order.DeliveryDate = deliveryDate
@@ -109,47 +138,203 @@ func ExtractDataFromLandstarHTML(bodyHTML string) (*ParserResult, error) {
 	orderItem.Height = height
 	orderItem.Weight = weight
 	orderItem.Hazardous = hazardous
-	logrus.Infof("Extracted Commodity - Length: %f, Width: %f, Height: %f, Weight: %f, Hazardous: %t", length, width, height, weight, hazardous)
+	logrus.Infof("Extracted Commodity - Length: %.0f, Width: %.0f, Height: %.0f, Weight: %.0f, Hazardous: %t", length, width, height, weight, hazardous)
+
+	if orderItem.Length == 0.0 {
+		// Inside the else block when Length is zero
+		originalTruckSize := strings.ToUpper(strings.TrimSpace(order.OriginalTruckSize))
+		re := regexp.MustCompile(`\d+`)
+		numberStr := re.FindString(originalTruckSize)
+		if numberStr != "" {
+			number, err := strconv.Atoi(numberStr)
+			if err != nil {
+				logrus.Errorf("Failed to convert extracted number to int: %v", err)
+				return nil, nil // Return nil without parsing or saving
+				// Handle error, possibly set default values
+			} else {
+				// Use the number to determine SuggestedTruckSize and TruckTypeID
+				if number <= 14.0 {
+					order.SuggestedTruckSize = "Sprinter"
+					order.TruckTypeID = 3
+				} else if number > 14.0 && number <= 18.0 {
+					order.SuggestedTruckSize = "Small Straight"
+					order.TruckTypeID = 1
+				} else if number > 18.0 && number <= 26.0 {
+					order.SuggestedTruckSize = "Large Straight"
+					order.TruckTypeID = 2
+				} else {
+					logrus.Warnf("TRUCK LENGTH TOO LONG %v", orderItem.Length)
+					return nil, nil // Return nil without parsing or saving
+				}
+			}
+		} else {
+			// No number found in OriginalTruckSize
+			logrus.Warnf("No numeric value found in OriginalTruckSize: %s", originalTruckSize)
+			return nil, nil
+			// Set default values or handle accordingly
+		}
+	}
+
+	// **Adjust SuggestedTruckSize and TruckTypeID based on Length**
+	// **Set OrderTypeID to 4**
+	order.OrderTypeID = 4
+	if orderItem.Length <= 14.0 {
+		order.SuggestedTruckSize = "Sprinter"
+		order.TruckTypeID = 3
+	} else if orderItem.Length > 14.0 && orderItem.Length <= 18.0 {
+		order.SuggestedTruckSize = "Small Straight"
+		order.TruckTypeID = 1
+	} else if orderItem.Length > 18.0 && orderItem.Length <= 26.0 {
+		order.SuggestedTruckSize = "Large Straight"
+		order.TruckTypeID = 2
+	} else {
+		logrus.Warnf("TRUCK LENGTH TOO LONG %v", orderItem.Length)
+		return nil, nil // Return nil without parsing or saving
+	}
+
+	logrus.Infof("Adjusted Suggested Truck Size: %s", order.SuggestedTruckSize)
+	logrus.Infof("Set TruckTypeID: %d", order.TruckTypeID)
+	logrus.Infof("Set OrderTypeID: %d", order.OrderTypeID)
 
 	// Pieces and Stackable are not specified; set default values
 	orderItem.Pieces = 1
 	orderItem.Stackable = false
-
-	// Extract City, State from Origin and Destination
-	originCity, originState := parseCityState(order.PickupLocation)
-	orderLocation.PickupCity = originCity
-	orderLocation.PickupState = originState
-
-	destCity, destState := parseCityState(order.DeliveryLocation)
-	orderLocation.DeliveryCity = destCity
-	orderLocation.DeliveryState = destState
-
-	// Set default country codes
-	orderLocation.PickupCountryCode = "US"
-	orderLocation.DeliveryCountryCode = "US"
-	orderLocation.PickupCountryName = "United States"
-	orderLocation.DeliveryCountryName = "United States"
 
 	// Create ParserResult
 	parserResult := &ParserResult{
 		Order:         order,
 		OrderLocation: orderLocation,
 		OrderItem:     orderItem,
+		PickupZip:     pickupZip,
+		DeliveryZip:   deliveryZip,
 	}
+
+	// Check and fill missing zip codes
+	if parserResult.PickupZip == "" {
+		pickupZip, err := GetZipCode(orderLocation.PickupCity, orderLocation.PickupState)
+		if err != nil {
+			logrus.Warnf("Failed to get pickup zip code: %v", err)
+		} else {
+			parserResult.PickupZip = pickupZip
+			logrus.Infof("Retrieved Pickup Zip Code: %s", pickupZip)
+		}
+	}
+
+	if parserResult.DeliveryZip == "" {
+		deliveryZip, err := GetZipCode(orderLocation.DeliveryCity, orderLocation.DeliveryState)
+		if err != nil {
+			logrus.Warnf("Failed to get delivery zip code: %v", err)
+		} else {
+			parserResult.DeliveryZip = deliveryZip
+			logrus.Infof("Retrieved Delivery Zip Code: %s", deliveryZip)
+		}
+	}
+
+	// After retrieving zip codes
+	if parserResult.PickupZip != "" {
+		orderLocation.PickupPostalCode = parserResult.PickupZip
+	}
+
+	if parserResult.DeliveryZip != "" {
+		orderLocation.DeliveryPostalCode = parserResult.DeliveryZip
+	}
+
+	// Proceed with building locations
+	pickupLocation := buildLocation(parserResult.PickupZip, orderLocation.PickupCity, orderLocation.PickupState, orderLocation.PickupCountryName)
+	deliveryLocation := buildLocation(parserResult.DeliveryZip, orderLocation.DeliveryCity, orderLocation.DeliveryState, orderLocation.DeliveryCountryName)
+
+	// Assign the constructed locations
+	order.PickupLocation = pickupLocation
+	orderLocation.PickupLabel = pickupLocation
+	logrus.Infof("Constructed Pickup Location: %s", pickupLocation)
+
+	order.DeliveryLocation = deliveryLocation
+	orderLocation.DeliveryLabel = deliveryLocation
+	logrus.Infof("Constructed Delivery Location: %s", deliveryLocation)
 
 	return parserResult, nil
 }
 
-// GetValueAfterLabel extracts the value after a specific label in a <td> element
+// Helper functions
+func parseCityStateZip(location string) (city, state, stateCode, zip string) {
+	location = strings.TrimSpace(location)
+	if location == "" {
+		return "", "", "", ""
+	}
+
+	// Split the location string by comma and trim spaces from each part
+	rawParts := strings.Split(location, ",")
+	parts := []string{}
+	for _, part := range rawParts {
+		trimmedPart := strings.TrimSpace(part)
+		if trimmedPart != "" {
+			parts = append(parts, trimmedPart)
+		}
+	}
+
+	// Assign city and state based on the number of parts
+	if len(parts) >= 2 {
+		city = parts[0]
+		statePart := parts[1]
+		zip = ""
+		if len(parts) >= 3 {
+			zip = parts[2]
+		}
+
+		// Normalize statePart to uppercase for matching
+		statePartUpper := strings.ToUpper(statePart)
+
+		// Try to get the state code from the state name
+		if code, exists := stateNameToCode[statePartUpper]; exists {
+			stateCode = code
+			state = statePart
+		} else if name, exists := stateCodeToName[statePartUpper]; exists {
+			stateCode = statePartUpper
+			state = name
+		} else {
+			// If not found, use statePart as state and leave stateCode empty
+			state = statePart
+			stateCode = ""
+		}
+	} else if len(parts) == 1 {
+		city = parts[0]
+		state = ""
+		stateCode = ""
+		zip = ""
+	} else {
+		city = ""
+		state = ""
+		stateCode = ""
+		zip = ""
+	}
+
+	// Trim spaces from city, state, and zip
+	city = strings.TrimSpace(city)
+	state = strings.TrimSpace(state)
+	zip = strings.TrimSpace(zip)
+
+	return city, state, stateCode, zip
+}
+
+func isNotEmpty(str string) bool {
+	return len(strings.TrimSpace(str)) > 0
+}
+
 func GetValueAfterLabel(doc *goquery.Document, label string) string {
 	value := ""
-	doc.Find("td").Each(func(i int, s *goquery.Selection) {
-		if strings.Contains(s.Text(), label) {
-			html, _ := s.Html()
-			// Remove the label and any HTML tags
-			text := strings.ReplaceAll(html, fmt.Sprintf("<label><b>%s</b></label>&nbsp;", label), "")
-			text = strings.ReplaceAll(text, fmt.Sprintf("<b>%s</b>", label), "")
-			value = strings.TrimSpace(stripHTMLTags(text))
+	doc.Find("tr").Each(func(i int, s *goquery.Selection) {
+		s.Find("td").Each(func(j int, td *goquery.Selection) {
+			tdText := strings.TrimSpace(td.Text())
+			if strings.HasPrefix(tdText, label) {
+				// Remove the label from the text
+				value = strings.TrimSpace(strings.Replace(tdText, label, "", 1))
+				// Remove any colons or extra spaces
+				value = strings.Trim(value, ": ")
+				return
+			}
+		})
+		if value != "" {
+			return
 		}
 	})
 	return value
@@ -164,6 +349,31 @@ func stripHTMLTags(s string) string {
 // ExtractOrderNumberFromLandstarHTML extracts the order number
 func ExtractOrderNumberFromLandstarHTML(doc *goquery.Document) string {
 	return GetValueAfterLabel(doc, "Load #")
+}
+
+func ExtractStopsFromLandstarHTML(doc *goquery.Document) (origin, destination string) {
+	// Find the table with id="stopsDiv"
+	doc.Find("div#stopsDiv").Each(func(i int, s *goquery.Selection) {
+		s.Find("tr").Each(func(i int, tr *goquery.Selection) {
+			// Skip the header row
+			if i == 0 {
+				return
+			}
+			td := tr.Find("td").First()
+			stopType := strings.TrimSpace(td.Text())
+			cityStateTd := tr.Find("td").Eq(1)
+			cityState := strings.TrimSpace(cityStateTd.Text())
+
+			logrus.Infof("Found stopType: %s, cityState: %s", stopType, cityState)
+
+			if stopType == "Origin" {
+				origin = cityState
+			} else if stopType == "Destination" {
+				destination = cityState
+			}
+		})
+	})
+	return origin, destination
 }
 
 // ExtractTrailerTypeFromLandstarHTML extracts the trailer type
@@ -193,54 +403,54 @@ func ExtractDestinationFromLandstarHTML(doc *goquery.Document) string {
 	return GetValueAfterLabel(doc, "Destination")
 }
 
-// ExtractPickupDateFromLandstarHTML extracts the pickup date
 func ExtractPickupDateFromLandstarHTML(doc *goquery.Document) (time.Time, error) {
-	pickupText := GetValueAfterLabel(doc, "Pickup")
-	return parseDateRange(pickupText)
+	pickupDateRange := GetValueAfterLabel(doc, "Pickup")
+	return parseDateRange(pickupDateRange)
 }
 
-// ExtractDeliveryDateFromLandstarHTML extracts the delivery date
 func ExtractDeliveryDateFromLandstarHTML(doc *goquery.Document) (time.Time, error) {
-	deliveryText := GetValueAfterLabel(doc, "Delivery")
-	return parseDateRange(deliveryText)
+	deliveryDateRange := GetValueAfterLabel(doc, "Delivery")
+	return parseDateRange(deliveryDateRange)
 }
 
 // ExtractNotesFromLandstarHTML extracts the notes from the comments section
 func ExtractNotesFromLandstarHTML(doc *goquery.Document) string {
 	notes := ""
-	doc.Find("table#comments").Next().Find("td").Each(func(i int, s *goquery.Selection) {
-		notes += s.Text()
-	})
-	notes = strings.TrimSpace(notes)
-	if notes == "" {
-		// Try to find "Comments" in td
-		doc.Find("td").Each(func(i int, s *goquery.Selection) {
-			if strings.Contains(s.Text(), "Comments") {
-				nextTr := s.Parent().Next()
-				notes = nextTr.Find("td").Text()
-				notes = strings.TrimSpace(notes)
-			}
+	// Find the table with id="comments"
+	doc.Find("table#comments").Each(func(i int, s *goquery.Selection) {
+		// Find the <td> in the next <tr>
+		s.Find("tr").Next().Find("td").Each(func(i int, s *goquery.Selection) {
+			notes = strings.TrimSpace(s.Text())
 		})
-	}
+	})
 	return notes
 }
 
-// ExtractCommodityFromLandstarHTML extracts commodity details
 func ExtractCommodityFromLandstarHTML(doc *goquery.Document) (length, width, height, weight float64, hazardous bool) {
-	doc.Find("#commodityDiv table tr").Each(func(i int, s *goquery.Selection) {
-		if i == 1 { // Skip the header row
-			lengthText := s.Find("td").Eq(2).Text()
-			widthText := s.Find("td").Eq(3).Text()
-			heightText := s.Find("td").Eq(4).Text()
-			weightText := s.Find("td").Eq(5).Text()
-			hazmatText := s.Find("td").Eq(6).Text()
-
-			length = parseFeetInches(lengthText)
-			width = parseFeetInches(widthText)
-			height = parseFeetInches(heightText)
-			weight = parseWeight(weightText)
-			hazardous = strings.TrimSpace(hazmatText) == "Y"
-		}
+	// Locate the commodity table
+	doc.Find("div#commodityDiv table").Each(func(i int, s *goquery.Selection) {
+		s.Find("tr").Each(func(j int, tr *goquery.Selection) {
+			// Skip header row
+			if j == 0 {
+				return
+			}
+			tds := tr.Find("td")
+			tds.Each(func(k int, td *goquery.Selection) {
+				text := td.Text()
+				switch k {
+				case 2: // Length
+					length = parseDimension(text)
+				case 3: // Width
+					width = parseDimension(text)
+				case 4: // Height
+					height = parseDimension(text)
+				case 5: // Weight
+					weight = parseWeight(text)
+				case 6: // Hazardous
+					hazardous = strings.TrimSpace(text) == "Y"
+				}
+			})
+		})
 	})
 	return
 }
@@ -278,31 +488,62 @@ func parseFeetInches(text string) float64 {
 	return 0.0
 }
 
-// parseWeight parses a weight string like "48,000 lbs" into float64
 func parseWeight(weightText string) float64 {
-	// Weight text is like: 48,000 lbs
-	weightText = strings.TrimSpace(weightText)
+
+	logrus.Infof("Raw weight text: %s", weightText)
+	// Trim whitespace and unescape HTML entities
+	weightText = strings.TrimSpace(html.UnescapeString(weightText))
+
+	// Remove non-breaking spaces and HTML entities
+	weightText = strings.ReplaceAll(weightText, "\u00a0", " ")
+	weightText = strings.ReplaceAll(weightText, "&nbsp;", " ")
+
+	// Remove units and commas
+	weightText = strings.ReplaceAll(weightText, "lbs", "")
+	weightText = strings.ReplaceAll(weightText, "lb", "")
 	weightText = strings.ReplaceAll(weightText, ",", "")
-	re := regexp.MustCompile(`(\d+)\s*lbs`)
-	matches := re.FindStringSubmatch(weightText)
-	if len(matches) > 1 {
-		weight, _ := strconv.ParseFloat(matches[1], 64)
-		return weight
+
+	// Trim again
+	weightText = strings.TrimSpace(weightText)
+
+	if weightText == "" {
+		return 0.0
 	}
-	return 0.0
+
+	weightValue, err := strconv.ParseFloat(weightText, 64)
+	if err != nil {
+		logrus.Errorf("Error parsing weight: %v", err)
+		return 0.0
+	}
+	return weightValue
 }
 
-// parseCityState splits a location string into city and state
-func parseCityState(location string) (string, string) {
-	location = strings.TrimSpace(location)
-	parts := strings.Split(location, ",")
-	if len(parts) >= 2 {
-		city := strings.TrimSpace(parts[0])
-		state := strings.TrimSpace(parts[1])
-		return city, state
-	}
-	return "", ""
-}
+// // parseCityState splits a location string into city, state, and state code
+// func parseCityState(location string) (city, state, stateCode string) {
+// 	location = strings.TrimSpace(location)
+// 	parts := strings.Split(location, ",")
+// 	if len(parts) >= 2 {
+// 		city = strings.TrimSpace(parts[0])
+// 		state = strings.TrimSpace(parts[1])
+
+// 		// Convert state name to uppercase to match keys in the map
+// 		stateUpper := strings.ToUpper(state)
+
+// 		// Get state code from state name
+// 		if code, exists := stateCodeToName[stateUpper]; exists {
+// 			stateCode = code
+// 		} else {
+// 			// Try reverse mapping if state name is actually code
+// 			if fullName, found := stateCodeToName[stateUpper]; found {
+// 				stateCode = stateUpper
+// 				state = fullName
+// 			} else {
+// 				stateCode = ""
+// 			}
+// 		}
+// 	}
+// 	return city, state, stateCode
+// }
 
 //FullCircle parser below
 
@@ -325,6 +566,60 @@ var stateCodeToName = map[string]string{
 	"OK": "Oklahoma", "OR": "Oregon", "PA": "Pennsylvania", "RI": "Rhode Island", "SC": "South Carolina",
 	"SD": "South Dakota", "TN": "Tennessee", "TX": "Texas", "UT": "Utah", "VT": "Vermont",
 	"VA": "Virginia", "WA": "Washington", "WV": "West Virginia", "WI": "Wisconsin", "WY": "Wyoming",
+}
+
+var stateNameToCode = map[string]string{
+	"ALABAMA":              "AL",
+	"ALASKA":               "AK",
+	"ARIZONA":              "AZ",
+	"ARKANSAS":             "AR",
+	"CALIFORNIA":           "CA",
+	"COLORADO":             "CO",
+	"CONNECTICUT":          "CT",
+	"DELAWARE":             "DE",
+	"FLORIDA":              "FL",
+	"GEORGIA":              "GA",
+	"HAWAII":               "HI",
+	"IDAHO":                "ID",
+	"ILLINOIS":             "IL",
+	"INDIANA":              "IN",
+	"IOWA":                 "IA",
+	"KANSAS":               "KS",
+	"KENTUCKY":             "KY",
+	"LOUISIANA":            "LA",
+	"MAINE":                "ME",
+	"MARYLAND":             "MD",
+	"MASSACHUSETTS":        "MA",
+	"MICHIGAN":             "MI",
+	"MINNESOTA":            "MN",
+	"MISSISSIPPI":          "MS",
+	"MISSOURI":             "MO",
+	"MONTANA":              "MT",
+	"NEBRASKA":             "NE",
+	"NEVADA":               "NV",
+	"NEW HAMPSHIRE":        "NH",
+	"NEW JERSEY":           "NJ",
+	"NEW MEXICO":           "NM",
+	"NEW YORK":             "NY",
+	"NORTH CAROLINA":       "NC",
+	"NORTH DAKOTA":         "ND",
+	"OHIO":                 "OH",
+	"OKLAHOMA":             "OK",
+	"OREGON":               "OR",
+	"PENNSYLVANIA":         "PA",
+	"RHODE ISLAND":         "RI",
+	"SOUTH CAROLINA":       "SC",
+	"SOUTH DAKOTA":         "SD",
+	"TENNESSEE":            "TN",
+	"TEXAS":                "TX",
+	"UTAH":                 "UT",
+	"VERMONT":              "VT",
+	"VIRGINIA":             "VA",
+	"WASHINGTON":           "WA",
+	"WEST VIRGINIA":        "WV",
+	"WISCONSIN":            "WI",
+	"WYOMING":              "WY",
+	"DISTRICT OF COLUMBIA": "DC",
 }
 
 // ExtractLocationFromHTML extracts the location details (zip, city, state, country) from the HTML
@@ -479,6 +774,95 @@ func ExtractOrderItemsFromHTML(doc *goquery.Document) (length, width, height, we
 	return length, width, height, weight, pieces, stackable, hazardous
 }
 
+func buildLocation(addressLine, city, state, countryName string) string {
+	// Function to clean a string
+	cleanString := func(s string) string {
+		s = strings.TrimSpace(s)
+		s = strings.ReplaceAll(s, "\u00A0", "")
+		s = strings.ReplaceAll(s, "\u200B", "") // Zero-width space
+		s = strings.ReplaceAll(s, "\ufeff", "") // Zero-width no-break space
+		s = strings.ReplaceAll(s, "\u00AD", "") // Soft hyphen
+		return s
+	}
+
+	// Clean each component
+	addressLine = cleanString(addressLine)
+	city = cleanString(city)
+	state = cleanString(state)
+	countryName = cleanString(countryName)
+
+	// Log the components after cleaning
+	logrus.Infof("Components after cleaning - addressLine: '%s', city: '%s', state: '%s', countryName: '%s'",
+		addressLine, city, state, countryName)
+
+	// Only add components that are not empty
+	parts := []string{}
+	if addressLine != "" {
+		parts = append(parts, addressLine)
+	}
+	if city != "" {
+		parts = append(parts, city)
+	}
+	if state != "" {
+		parts = append(parts, state)
+	}
+	if countryName != "" {
+		parts = append(parts, countryName)
+	}
+
+	return strings.Join(parts, ", ")
+}
+
+func parseDimension(dimensionText string) float64 {
+	// Unescape HTML entities and initial cleaning
+	dimensionText = html.UnescapeString(dimensionText)
+	dimensionText = strings.ReplaceAll(dimensionText, "\u00a0", " ")
+	dimensionText = strings.ReplaceAll(dimensionText, "&nbsp;", " ")
+	dimensionText = strings.ReplaceAll(dimensionText, "\n", " ")
+	dimensionText = strings.ReplaceAll(dimensionText, "\r", " ")
+	dimensionText = strings.Join(strings.Fields(dimensionText), " ")
+	dimensionText = strings.TrimSpace(dimensionText)
+
+	// **Remove unwanted characters before logging**
+	dimensionText = strings.ReplaceAll(dimensionText, "'", "")
+	dimensionText = strings.ReplaceAll(dimensionText, "\"", "")
+
+	// Log the cleaned raw dimension text
+	logrus.Infof("Raw dimension text: %s", dimensionText)
+
+	if dimensionText == "" || dimensionText == "0" {
+		return 0.0
+	}
+
+	// Use regular expressions to extract numbers
+	re := regexp.MustCompile(`^(\d+)(?:\s+(\d+))?$`)
+	matches := re.FindStringSubmatch(dimensionText)
+
+	if matches == nil {
+		logrus.Errorf("Dimension text '%s' does not match expected format", dimensionText)
+		return 0.0
+	}
+
+	feetStr := matches[1]
+	inchesStr := matches[2]
+
+	feet, _ := strconv.ParseFloat(feetStr, 64)
+	inches := 0.0
+	if inchesStr != "" {
+		inches, _ = strconv.ParseFloat(inchesStr, 64)
+	}
+
+	totalFeet := feet + (inches / 12.0)
+
+	// Round to two decimal places
+	totalFeet = math.Round(totalFeet*100) / 100
+
+	// Log the parsed dimension without 'feet' unit
+	logrus.Infof("Parsed dimension: %.2f", totalFeet)
+
+	return totalFeet
+}
+
 // Helper function to parse float values from strings with optional units (like " in", " lbs")
 func parseFloatFromText(text string) float64 {
 	// Use regex to extract numeric part from string
@@ -597,7 +981,7 @@ var emailRegex = regexp.MustCompile(`[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{
 // ExtractReplyTo looks for the phrase "reply to" and extracts the email address after it.
 func ExtractReplyTo(body string) string {
 	// Log the body to debug what's inside it
-	log.Printf("Body content before searching for reply-to:\n%s\n", body)
+	//log.Printf("Body content before searching for reply-to:\n%s\n", body)
 
 	// Convert body to lowercase for case-insensitive matching
 	lowerBody := strings.ToLower(body)
@@ -706,4 +1090,71 @@ func ExtractNotesFromHTML(doc *goquery.Document) (notes string) {
 	})
 
 	return notes
+}
+
+func GetZipCode(city, state string) (string, error) {
+	// Prepare the base URL and query parameters
+	baseURL := "http://207.244.250.222:4000/v1/search"
+	params := url.Values{}
+	// Construct the text parameter with city and state
+	query := fmt.Sprintf("%s, %s", city, state)
+	params.Add("text", query)
+	params.Add("size", "1") // Limit to the best match
+
+	// Construct the full URL
+	fullURL := fmt.Sprintf("%s?%s", baseURL, params.Encode())
+
+	// Make the HTTP request
+	resp, err := http.Get(fullURL)
+	if err != nil {
+		logrus.WithField("url", fullURL).Error("Failed to make geocoding request: ", err)
+		return "", fmt.Errorf("failed to make geocoding request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read the response body
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		logrus.WithField("url", fullURL).Error("Failed to read geocoding response body: ", err)
+		return "", fmt.Errorf("failed to read geocoding response body: %w", err)
+	}
+
+	// Unmarshal the response into a generic interface
+	var result map[string]interface{}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		logrus.WithFields(logrus.Fields{
+			"url":  fullURL,
+			"body": string(body),
+		}).Error("Failed to unmarshal geocoding response: ", err)
+		return "", fmt.Errorf("failed to unmarshal geocoding response: %w", err)
+	}
+
+	// Print the full URL in case of error
+	logrus.WithField("url", fullURL).Info("Geocoding URL sent for address")
+
+	// Check if there are any features in the response
+	features, ok := result["features"].([]interface{})
+	if !ok || len(features) == 0 {
+		logrus.WithField("url", fullURL).Error("No geocoding features found in the response")
+		return "", fmt.Errorf("no geocoding features found in the response")
+	}
+
+	// Extract the first feature's properties
+	firstFeature := features[0].(map[string]interface{})
+	properties, ok := firstFeature["properties"].(map[string]interface{})
+	if !ok {
+		logrus.Warn("Properties field is missing in geocoding response")
+		return "", fmt.Errorf("properties field is missing in geocoding response")
+	}
+
+	// Extract the postal code
+	postalCode, ok := properties["postalcode"].(string)
+	if !ok || postalCode == "" {
+		logrus.Warn("Postal code not found in properties")
+		return "", fmt.Errorf("postal code not found in properties")
+	}
+
+	// Return the postal code
+	return postalCode, nil
 }
