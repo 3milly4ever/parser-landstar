@@ -141,44 +141,33 @@ func ExtractDataFromLandstarHTML(bodyHTML string) (*ParserResult, error) {
 	logrus.Infof("Extracted Commodity - Length: %.0f, Width: %.0f, Height: %.0f, Weight: %.0f, Hazardous: %t", length, width, height, weight, hazardous)
 
 	if orderItem.Length == 0.0 {
-		// Inside the else block when Length is zero
+		// Length is zero, need to extract from OriginalTruckSize
 		originalTruckSize := strings.ToUpper(strings.TrimSpace(order.OriginalTruckSize))
 		re := regexp.MustCompile(`\d+`)
 		numberStr := re.FindString(originalTruckSize)
+		logrus.Infof("OriginalTruckSize: %s", originalTruckSize)
 		if numberStr != "" {
+			logrus.Infof("Extracted number string from OriginalTruckSize: %s", numberStr)
 			number, err := strconv.Atoi(numberStr)
 			if err != nil {
 				logrus.Errorf("Failed to convert extracted number to int: %v", err)
 				return nil, nil // Return nil without parsing or saving
-				// Handle error, possibly set default values
 			} else {
-				// Use the number to determine SuggestedTruckSize and TruckTypeID
-				if number <= 14.0 {
-					order.SuggestedTruckSize = "Sprinter"
-					order.TruckTypeID = 3
-				} else if number > 14.0 && number <= 18.0 {
-					order.SuggestedTruckSize = "Small Straight"
-					order.TruckTypeID = 1
-				} else if number > 18.0 && number <= 26.0 {
-					order.SuggestedTruckSize = "Large Straight"
-					order.TruckTypeID = 2
-				} else {
-					logrus.Warnf("TRUCK LENGTH TOO LONG %v", orderItem.Length)
-					return nil, nil // Return nil without parsing or saving
-				}
+				logrus.Infof("Extracted number from OriginalTruckSize: %d", number)
+				// Use the number to set orderItem.Length
+				orderItem.Length = float64(number)
 			}
 		} else {
 			// No number found in OriginalTruckSize
 			logrus.Warnf("No numeric value found in OriginalTruckSize: %s", originalTruckSize)
-			return nil, nil
-			// Set default values or handle accordingly
+			return nil, nil // Return nil without parsing or saving
 		}
 	}
 
 	// **Adjust SuggestedTruckSize and TruckTypeID based on Length**
 	// **Set OrderTypeID to 4**
 	order.OrderTypeID = 4
-	if orderItem.Length <= 14.0 {
+	if orderItem.Length > 0 && orderItem.Length <= 14.0 {
 		order.SuggestedTruckSize = "Sprinter"
 		order.TruckTypeID = 3
 	} else if orderItem.Length > 14.0 && orderItem.Length <= 18.0 {

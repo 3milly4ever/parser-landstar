@@ -419,7 +419,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		return err
 	}
 
-	orderTypeID := 4
+	//orderTypeID := 4
 	// Create and save the Order record to the database, including TruckTypeID
 	order := models.Order{
 		OrderNumber:        getStringValue(data["orderNumber"]),
@@ -433,7 +433,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		UpdatedAt:          time.Now(),
 		PickupZip:          getStringValue(data["pickupZip"]),
 		DeliveryZip:        getStringValue(data["deliveryZip"]),
-		OrderTypeID:        orderTypeID,
+		OrderTypeID:        getIntValue(data["orderTypeID"]),
 		TruckTypeID:        truckTypeID, // Ensure TruckTypeID from SQS is used
 		OriginalTruckSize:  getStringValue(data["originalTruckSize"]),
 		EstimatedMiles:     getIntValue(data["estimatedMiles"]),
@@ -537,6 +537,8 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		logrus.Error("Failed to update parser log record: ", err)
 		metrics.MessagesFailed.Inc()
 		return err
+	} else {
+		logrus.WithField("parser_log_id", parserLog.ID).Info("ParserLog updated in database")
 	}
 
 	// // Send order ID to external API
@@ -547,6 +549,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	// 	return err
 	// }
 
+	// // Send order ID to external API
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://platform.hfield.net/api/send_order?order_id=%d", order.ID), nil)
 	if err != nil {
 		logrus.Error("Failed to create HTTP request: ", err)
@@ -581,7 +584,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	// Increment the messagesParsed counter after successful processing
 	metrics.MessagesParsed.Inc()
 
-	logrus.Infof("Order type ID: %v", orderTypeID)
+	logrus.Infof("Order type ID: %v", getIntValue(data["orderTypeID"]))
 	return nil
 }
 

@@ -34,7 +34,7 @@ var (
 		Help:    "Duration of message processing in seconds",
 		Buckets: prometheus.DefBuckets,
 	})
-
+	
 	MessagesDeleted = prometheus.NewCounter(prometheus.CounterOpts{
 		Name: "sqs_worker_messages_deleted_total",
 		Help: "Total number of messages deleted from SQS",

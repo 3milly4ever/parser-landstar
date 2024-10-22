@@ -103,8 +103,15 @@ func MailgunHandler(c *fiber.Ctx) error {
 
 		// **Handle nil parserResult when the truck size is ignored**
 		if parserResult == nil {
-			logrus.Warn("ParserResult is nil due to ignored truck size. Skipping processing.")
-			return c.SendString("Email ignored due to truck size")
+			logrus.Warn("ParserResult is nil due to ignored truck size. Deleting parser log and skipping processing.")
+
+			// Delete the parserLog record
+			if err := db.Delete(&parserLog).Error; err != nil {
+				logrus.Error("Failed to delete parser log record: ", err)
+				return c.Status(fiber.StatusInternalServerError).SendString("Failed to delete parser log record")
+			}
+
+			return c.SendString("Email ignored due to truck size and parser log deleted")
 		}
 
 		// Extract reply-to from plain text body
@@ -146,6 +153,7 @@ func MailgunHandler(c *fiber.Ctx) error {
 			"pieces":              parserResult.OrderItem.Pieces,
 			"stackable":           parserResult.OrderItem.Stackable,
 			"hazardous":           parserResult.OrderItem.Hazardous,
+			"orderTypeID":         5,
 			"replyTo":             replyTo,
 			"subject":             subject,
 			"bodyHTML":            bodyHTML,
@@ -320,6 +328,7 @@ func MailgunHandler(c *fiber.Ctx) error {
 		"deliveryCountry":     deliveryCountry,
 		"deliveryCountryCode": deliveryCountryCode, // Include delivery country code
 		"estimatedMiles":      estimatedMiles,
+		"orderTypeID":         4,
 		"length":              length,
 		"width":               width,
 		"height":              height,
