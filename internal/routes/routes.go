@@ -2,6 +2,7 @@ package routes
 
 import (
 	"github.com/3milly4ever/parser-landstar/internal/handler"
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
 )
@@ -14,5 +15,16 @@ func Setup(app *fiber.App) {
 	})
 
 	// Mailgun route
-	app.Post("/mailgun", handler.MailgunHandler)
+	app.Post("/mailgun", func(c *fiber.Ctx) error {
+		ctx := c.Context()
+		request := events.APIGatewayProxyRequest{
+			Body: string(c.Body()),
+			// Add other necessary fields from c to request
+		}
+		response, err := handler.LambdaHandler(ctx, request)
+		if err != nil {
+			return err
+		}
+		return c.Status(response.StatusCode).SendString(response.Body)
+	})
 }
