@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 15s  # How often Prometheus will scrape metrics
+  evaluation_interval: 15s  # How often rules will be evaluated
+  scrape_timeout: 10s  # Timeout for scraping metrics
+
+scrape_configs:
+  # Configuration for your SQS worker metrics
+  - job_name: 'sqs_worker'
+    static_configs:
+      - targets: ['127.0.0.1:2112']  # Your worker's metrics endpoint
+
