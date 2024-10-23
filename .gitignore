@@ -1,3 +1,4 @@
 .env
 old-logs/app.log
 logs/app.log
+logs/app.log
