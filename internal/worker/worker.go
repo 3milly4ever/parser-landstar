@@ -9,146 +9,46 @@ import (
 	"log"
 	"net/http"
 	"net/url"
-	"os"
-	"os/signal"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/3milly4ever/parser-landstar/internal/metrics"
 	models "github.com/3milly4ever/parser-landstar/internal/model"
 	config "github.com/3milly4ever/parser-landstar/pkg"
-	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/sqs"
+	"github.com/aws/aws-lambda-go/events"
 	"github.com/sirupsen/logrus"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 )
 
-const maxWorkers = 10
+var db *gorm.DB
 
-type SQSWorker struct {
-	sqsClient *sqs.SQS
-	db        *gorm.DB
-	queueURL  string
-}
-
-func NewSQSWorker(queueURL string, awsRegion string) (*SQSWorker, error) {
-	// Initialize SQS client
-	sess := session.Must(session.NewSession(&aws.Config{
-		Region: aws.String(awsRegion),
-	}))
-	sqsClient := sqs.New(sess)
-
-	// Initialize MySQL database connection
+// Initialize the database and CloudWatch metrics
+func init() {
+	// Initialize the database connection
 	dsn := config.AppConfig.MySQLDSN // Update with your DSN
-	db, err := gorm.Open(mysql.Open(dsn), &gorm.Config{})
+	var err error
+	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
 	if err != nil {
-		return nil, err
+		log.Fatalf("Failed to connect to the database: %v", err)
 	}
 
-	return &SQSWorker{
-		sqsClient: sqsClient,
-		db:        db,
-		queueURL:  queueURL,
-	}, nil
 }
 
-func (worker *SQSWorker) Start() {
-	// Create a channel to receive messages
-	messageChan := make(chan *sqs.Message, 10)
-
-	// Create separate wait groups
-	var wgWorkers sync.WaitGroup
-	var wgPoller sync.WaitGroup
-
-	// Context for graceful shutdown
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// Signal handling for graceful shutdown
-	sigChan := make(chan os.Signal, 1)
-	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Start worker goroutines
-	for i := 0; i < maxWorkers; i++ {
-		wgWorkers.Add(1)
-		go func() {
-			defer wgWorkers.Done()
-			for {
-				select {
-				case message, ok := <-messageChan:
-					if !ok {
-						return // Channel closed, stop the worker
-					}
-					// Process the message
-					if err := worker.processMessage(message); err != nil {
-						log.Printf("Error processing message: %v", err)
-					}
-					// Delete the message from SQS
-					_, err := worker.sqsClient.DeleteMessage(&sqs.DeleteMessageInput{
-						QueueUrl:      aws.String(worker.queueURL),
-						ReceiptHandle: message.ReceiptHandle,
-					})
-					if err != nil {
-						log.Printf("Error deleting message: %v", err)
-					}
-					metrics.MessagesDeleted.Inc()
-				case <-ctx.Done():
-					return // Stop the worker if context is canceled
-				}
-			}
-		}()
-	}
-
-	// Start the polling goroutine
-	wgPoller.Add(1)
-	go func() {
-		defer wgPoller.Done()
-		for {
-			// Check if context is done before polling
-			select {
-			case <-ctx.Done():
-				return
-			default:
-			}
-
-			// Poll SQS for messages
-			result, err := worker.sqsClient.ReceiveMessage(&sqs.ReceiveMessageInput{
-				QueueUrl:            aws.String(worker.queueURL),
-				MaxNumberOfMessages: aws.Int64(10),
-				WaitTimeSeconds:     aws.Int64(20),
-			})
-			if err != nil {
-				log.Printf("Error receiving message: %v", err)
-				continue
-			}
-
-			// Send messages to the channel
-			for _, message := range result.Messages {
-				select {
-				case messageChan <- message:
-				case <-ctx.Done():
-					return
-				}
-			}
+// LambdaHandler is the main entry point for AWS Lambda, triggered by SQS events
+func LambdaHandler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	for _, message := range sqsEvent.Records {
+		// Process each message
+		err := processMessage(message.Body)
+		if err != nil {
+			log.Printf("Failed to process message: %v", err)
+			metrics.IncrementMessagesFailed()
+			// Optionally, return the error to cause Lambda to retry the message
+			// return err
+			continue // Continue processing next message
 		}
-	}()
-
-	// Wait for a shutdown signal
-	<-sigChan
-	log.Println("Shutting down...")
-	cancel() // Signal cancellation
-
-	// Wait for the polling goroutine to finish
-	wgPoller.Wait()
-
-	// Close the message channel after polling goroutine has stopped
-	close(messageChan)
-
-	// Wait for all worker goroutines to finish
-	wgWorkers.Wait()
-	log.Println("Workers stopped")
+		metrics.IncrementMessagesProcessed()
+	}
+	return nil
 }
 
 func ExtractCoordinatesAndCounty(geocodingData map[string]interface{}) (float64, float64, string, error) {
@@ -268,20 +168,19 @@ func GeocodeLocation(address string) (float64, float64, string, error) {
 
 	return lat, lng, county, nil
 }
-
-func (worker *SQSWorker) processMessage(message *sqs.Message) error {
+func processMessage(messageBody string) error {
 	// Log the raw message
-	logrus.WithField("raw_message", *message.Body).Info("Processing SQS message")
+	logrus.WithField("raw_message", messageBody).Info("Processing SQS message")
 
 	// Increment the messagesReceived counter
-	metrics.MessagesReceived.Inc()
+	metrics.IncrementMessagesReceived()
 
 	// Parse the message body
 	var data map[string]interface{}
-	err := json.Unmarshal([]byte(*message.Body), &data)
+	err := json.Unmarshal([]byte(messageBody), &data)
 	if err != nil {
 		logrus.Error("Error unmarshalling message: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 
@@ -290,9 +189,9 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	// Fetch the existing parser_log record
 	var parserLog models.ParserLog
-	if err := worker.db.First(&parserLog, parserLogID).Error; err != nil {
+	if err := db.First(&parserLog, parserLogID).Error; err != nil {
 		logrus.Error("Failed to find parser log record: ", err)
-		metrics.MessagesFailed.Inc()
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 
@@ -309,7 +208,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	deliveryState := getStringValue(data["deliveryState"])
 	deliveryCountryCode := getStringValue(data["deliveryCountryCode"])
 	orderNumber := getStringValue(data["orderNumber"])
-	truckTypeID := getIntValue(data["truckTypeID"]) // Ensure this is extracted
+	truckTypeID := getIntValue(data["truckTypeID"])
 
 	// Log the extracted fields to check if they are empty
 	logrus.WithFields(logrus.Fields{
@@ -328,8 +227,8 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	// Check if key fields are missing or empty
 	if pickupCity == "" || deliveryCity == "" || orderNumber == "" {
 		logrus.Warn("Missing key fields: pickupCity, deliveryCity, or orderNumber is empty. Skipping message.")
-		metrics.MessagesFailed.Inc() // Increment the failure counter
-		return nil                   // Skip processing this message
+		metrics.IncrementMessagesFailed()
+		return nil // Skip processing this message
 	}
 
 	// Extract the reply-to email from the parsed data
@@ -361,7 +260,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		pickupLat, pickupLng, pickupCounty, err = GeocodeLocation(pickupAddress)
 		if err != nil {
 			logrus.Error("Failed to geocode pickup location: ", err)
-			metrics.MessagesFailed.Inc() // Increment the failure counter
+			metrics.IncrementMessagesFailed()
 			return err
 		}
 		logrus.WithFields(logrus.Fields{
@@ -375,7 +274,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		deliveryLat, deliveryLng, deliveryCounty, err = GeocodeLocation(deliveryAddress)
 		if err != nil {
 			logrus.Error("Failed to geocode delivery location: ", err)
-			metrics.MessagesFailed.Inc() // Increment the failure counter
+			metrics.IncrementMessagesFailed()
 			return err
 		}
 		logrus.WithFields(logrus.Fields{
@@ -408,18 +307,17 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	pickupDate, err := parseDateTime(getStringValue(data["pickupDate"]))
 	if err != nil {
 		logrus.WithField("pickupDate", data["pickupDate"]).Error("Failed to parse pickupDate: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 
 	deliveryDate, err := parseDateTime(getStringValue(data["deliveryDate"]))
 	if err != nil {
 		logrus.WithField("deliveryDate", data["deliveryDate"]).Error("Failed to parse deliveryDate: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 
-	//orderTypeID := 4
 	// Create and save the Order record to the database, including TruckTypeID
 	order := models.Order{
 		OrderNumber:        getStringValue(data["orderNumber"]),
@@ -441,9 +339,9 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 
 	logrus.Infof("Inserting order with TruckTypeID: %d", order.TruckTypeID)
 
-	if err := worker.db.Create(&order).Error; err != nil {
+	if err := db.Create(&order).Error; err != nil {
 		logrus.Error("Failed to save order: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 	logrus.WithField("order_id", order.ID).Info("Order saved to database")
@@ -479,9 +377,9 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		UpdatedAt:           time.Now(),
 	}
 
-	if err := worker.db.Create(&orderLocation).Error; err != nil {
+	if err := db.Create(&orderLocation).Error; err != nil {
 		logrus.Error("Failed to save order location: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 	logrus.WithField("order_location_id", orderLocation.ID).Info("OrderLocation saved to database")
@@ -500,9 +398,9 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		UpdatedAt: time.Now(),
 	}
 
-	if err := worker.db.Create(&orderItem).Error; err != nil {
+	if err := db.Create(&orderItem).Error; err != nil {
 		logrus.Error("Failed to save order item: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 	logrus.WithField("order_item_id", orderItem.ID).Info("OrderItem saved to database")
@@ -517,9 +415,9 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 		UpdatedAt: time.Now(),
 	}
 
-	if err := worker.db.Create(&orderEmail).Error; err != nil {
+	if err := db.Create(&orderEmail).Error; err != nil {
 		logrus.Error("Failed to save order email: ", err)
-		metrics.MessagesFailed.Inc() // Increment the failure counter
+		metrics.IncrementMessagesFailed()
 		return err
 	}
 	logrus.WithField("order_email_id", orderEmail.ID).Info("OrderEmail saved to database")
@@ -533,23 +431,15 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	parserLog.UpdatedAt = time.Now()
 
 	// Save the updated parser_log record
-	if err := worker.db.Save(&parserLog).Error; err != nil {
+	if err := db.Save(&parserLog).Error; err != nil {
 		logrus.Error("Failed to update parser log record: ", err)
-		metrics.MessagesFailed.Inc()
+		metrics.IncrementMessagesFailed()
 		return err
 	} else {
 		logrus.WithField("parser_log_id", parserLog.ID).Info("ParserLog updated in database")
 	}
 
-	// // Send order ID to external API
-	// orderIDPayload := map[string]int{"order_id": order.ID}
-	// payloadBytes, err := json.Marshal(orderIDPayload)
-	// if err != nil {
-	// 	logrus.Error("Failed to marshal order ID payload: ", err)
-	// 	return err
-	// }
-
-	// // Send order ID to external API
+	// Send order ID to external API
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://platform.hfield.net/api/send_order?order_id=%d", order.ID), nil)
 	if err != nil {
 		logrus.Error("Failed to create HTTP request: ", err)
@@ -582,7 +472,7 @@ func (worker *SQSWorker) processMessage(message *sqs.Message) error {
 	}).Info("Successfully processed and saved order")
 
 	// Increment the messagesParsed counter after successful processing
-	metrics.MessagesParsed.Inc()
+	metrics.IncrementMessagesParsed()
 
 	logrus.Infof("Order type ID: %v", getIntValue(data["orderTypeID"]))
 	return nil
