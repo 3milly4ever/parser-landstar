@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/3milly4ever/parser-landstar/internal/metrics"
@@ -20,34 +21,72 @@ import (
 	"gorm.io/gorm"
 )
 
-var db *gorm.DB
+var (
+	db     *gorm.DB
+	dbOnce sync.Once
+)
 
-// Initialize the database and CloudWatch metrics
-func init() {
-	// Initialize the database connection
-	dsn := config.AppConfig.MySQLDSN // Update with your DSN
+// InitializeDB initializes the database connection and ensures it's done only once.
+func InitializeDB() (*gorm.DB, error) {
 	var err error
-	db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatalf("Failed to connect to the database: %v", err)
-	}
+	dbOnce.Do(func() {
+		dsn := config.AppConfig.MySQLDSN
+		db, err = gorm.Open(mysql.Open(dsn), &gorm.Config{})
+		if err != nil {
+			logrus.Fatalf("Failed to connect to the database: %v", err)
+		}
 
+		// Optionally set database connection pool settings here
+		sqlDB, err := db.DB()
+		if err != nil {
+			log.Fatalf("Failed to get sql.DB from GORM: %v", err)
+		}
+		if err := sqlDB.Ping(); err != nil {
+			log.Fatalf("Failed to ping database: %v", err)
+		}
+		// Configure database connection pool settings
+		sqlDB.SetMaxOpenConns(10)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(time.Minute * 5)
+	})
+	return db, err
 }
 
-// LambdaHandler is the main entry point for AWS Lambda, triggered by SQS events
 func LambdaHandler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	// Use a wait group to ensure all goroutines finish before returning
+	var wg sync.WaitGroup
+	errChan := make(chan error, len(sqsEvent.Records))
+
+	// Process each message concurrently
 	for _, message := range sqsEvent.Records {
-		// Process each message
-		err := processMessage(message.Body)
-		if err != nil {
-			log.Printf("Failed to process message: %v", err)
-			metrics.IncrementMessagesFailed()
-			// Optionally, return the error to cause Lambda to retry the message
-			// return err
-			continue // Continue processing next message
-		}
-		metrics.IncrementMessagesProcessed()
+		wg.Add(1)
+		go func(msg events.SQSMessage) {
+			defer wg.Done()
+
+			err := processMessage(msg.Body)
+			if err != nil {
+				log.Printf("Failed to process message: %v", err)
+				metrics.IncrementMessagesFailed()
+				errChan <- err
+			} else {
+				metrics.IncrementMessagesProcessed()
+			}
+		}(message)
 	}
+
+	// Wait for all message processing to finish
+	wg.Wait()
+
+	close(errChan)
+	var processErrors []error
+	for err := range errChan {
+		processErrors = append(processErrors, err)
+	}
+
+	if len(processErrors) > 0 {
+		return fmt.Errorf("%d messages failed to process: %v", len(processErrors), processErrors)
+	}
+
 	return nil
 }
 
@@ -168,7 +207,15 @@ func GeocodeLocation(address string) (float64, float64, string, error) {
 
 	return lat, lng, county, nil
 }
+
 func processMessage(messageBody string) error {
+
+	// Ensure the database is initialized
+	db, err := InitializeDB()
+
+	if err != nil {
+		return fmt.Errorf("failed to initialize DB: %v", err)
+	}
 	// Log the raw message
 	logrus.WithField("raw_message", messageBody).Info("Processing SQS message")
 
@@ -177,7 +224,7 @@ func processMessage(messageBody string) error {
 
 	// Parse the message body
 	var data map[string]interface{}
-	err := json.Unmarshal([]byte(messageBody), &data)
+	err = json.Unmarshal([]byte(messageBody), &data)
 	if err != nil {
 		logrus.Error("Error unmarshalling message: ", err)
 		metrics.IncrementMessagesFailed()
@@ -439,7 +486,6 @@ func processMessage(messageBody string) error {
 		logrus.WithField("parser_log_id", parserLog.ID).Info("ParserLog updated in database")
 	}
 
-	// Send order ID to external API
 	req, err := http.NewRequest("GET", fmt.Sprintf("https://platform.hfield.net/api/send_order?order_id=%d", order.ID), nil)
 	if err != nil {
 		logrus.Error("Failed to create HTTP request: ", err)
@@ -447,35 +493,31 @@ func processMessage(messageBody string) error {
 	}
 
 	req.Header.Set("Content-Type", "application/json") // Optional for GET, but can be included if necessary
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		logrus.Error("Failed to send order ID to external API: ", err)
-		return err
-	} else {
-		logrus.Info("Successfully sent order ID to external API")
+
+	for retries := 0; retries < 3; retries++ {
+		client := &http.Client{
+			Timeout: 10 * time.Second, // Adding a timeout to prevent hanging
+		}
+		resp, err := client.Do(req)
+
+		if err == nil {
+			defer resp.Body.Close() // Ensure the response body is closed if successful
+
+			if resp.StatusCode == http.StatusOK {
+				logrus.Info("Successfully sent order ID to external API")
+				return nil // Exit loop upon success
+			}
+
+			logrus.WithField("status_code", resp.StatusCode).Error("External API call failed with non-200 status code")
+		} else {
+			logrus.WithField("retry", retries+1).Error("Retrying failed API call due to error", err)
+		}
+
+		time.Sleep(time.Duration(retries+1) * time.Second) // Exponential backoff
 	}
 
-	defer resp.Body.Close()
+	return fmt.Errorf("external API call failed after 3 retries")
 
-	if resp.StatusCode != http.StatusOK {
-		logrus.WithField("status_code", resp.StatusCode).Error("External API call failed")
-		return fmt.Errorf("external API call failed with status code: %d", resp.StatusCode)
-	}
-
-	// Log additional details about the order processing
-	logrus.WithFields(logrus.Fields{
-		"order_id":    order.ID,
-		"orderNumber": order.OrderNumber,
-		"replyTo":     replyTo,
-		"subject":     orderEmail.Subject,
-	}).Info("Successfully processed and saved order")
-
-	// Increment the messagesParsed counter after successful processing
-	metrics.IncrementMessagesParsed()
-
-	logrus.Infof("Order type ID: %v", getIntValue(data["orderTypeID"]))
-	return nil
 }
 
 func getFloatValue(data interface{}) float64 {

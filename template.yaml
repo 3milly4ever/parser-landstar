@@ -1,0 +1,22 @@
+service: email-parser-service
+provider:
+  name: aws
+  runtime: go1.x
+  environment:
+    SQS_QUEUE_URL: ${env:SQS_QUEUE_URL}
+    MYSQL_DSN: ${env:MYSQL_DSN}
+
+functions:
+  MyLambdaFunction:
+    handler: main
+    events:
+      - sqs:
+          arn:
+            Fn::GetAtt:
+              - MySQSQueue
+              - Arn
+
+resources:
+  Resources:
+    MySQSQueue:
+      Type: AWS::SQS::Queue

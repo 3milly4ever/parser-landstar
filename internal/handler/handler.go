@@ -33,13 +33,14 @@ func SetDB(database *gorm.DB) {
 
 }
 
-// Initialize AWS session and SQS client in the init function for reuse across Lambda invocations
+// Add retries incase an initial connection fails
 func init() {
 	sess := session.Must(session.NewSession())
-	sqsClient = sqs.New(sess)
+	sqsClient = sqs.New(sess, aws.NewConfig().WithMaxRetries(3))
 }
 
-// InitializeDB initializes the DB connection (used once per Lambda invocation)
+// Initialize AWS session and SQS client in the init function for reuse across Lambda invocations
+// Set connection pooling limits and ensure connection is available throughout the Lambda lifecycle
 func InitializeDB() (*gorm.DB, error) {
 	var err error
 	initDB.Do(func() {
@@ -48,9 +49,18 @@ func InitializeDB() (*gorm.DB, error) {
 		if err != nil {
 			logrus.Error("Failed to connect to the database: ", err)
 		}
+
+		// Set connection pooling limits
+		sqlDB, err := db.DB()
+		if err != nil {
+			logrus.Fatalf("Failed to get sql.DB from GORM: %v", err)
+		}
+		sqlDB.SetMaxOpenConns(10)
+		sqlDB.SetMaxIdleConns(5)
+		sqlDB.SetConnMaxLifetime(time.Minute * 5)
 	})
+
 	if db == nil {
-		// Ensure db is returned if initialization failed
 		logrus.Error("Database initialization failed. DB is nil.")
 		return nil, err
 	}
